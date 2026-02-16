@@ -26,6 +26,15 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;');
 }
 
+function linkify(html: string): string {
+  // Convert markdown-style [text](url) to <a> tags
+  // Runs AFTER escapeHtml so the brackets/parens are still literal (not HTML entities)
+  return html.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+    '<a href="$2" style="color:#1a73e8;text-decoration:none">$1</a>'
+  );
+}
+
 function plainTextToHtml(text: string): string {
   const escaped = escapeHtml(text);
 
@@ -39,7 +48,7 @@ function plainTextToHtml(text: string): string {
       // Detect numbered list (all lines start with "1." or "1)")
       if (isNumberedListBlock(lines)) {
         const items = lines
-          .map((l) => `<li style="margin:0 0 4px 0">${l.replace(/^\d+[\.\)]\s/, '')}</li>`)
+          .map((l) => `<li style="margin:0 0 4px 0">${linkify(l.replace(/^\d+[\.\)]\s/, ''))}</li>`)
           .join('\n');
         return `<ol style="margin:0 0 12px 0;padding-left:24px">\n${items}\n</ol>`;
       }
@@ -47,14 +56,14 @@ function plainTextToHtml(text: string): string {
       // Detect bullet list (all lines start with "- " or "* ")
       if (isBulletListBlock(lines)) {
         const items = lines
-          .map((l) => `<li style="margin:0 0 4px 0">${l.replace(/^[-*]\s/, '')}</li>`)
+          .map((l) => `<li style="margin:0 0 4px 0">${linkify(l.replace(/^[-*]\s/, ''))}</li>`)
           .join('\n');
         return `<ul style="margin:0 0 12px 0;padding-left:24px">\n${items}\n</ul>`;
       }
 
       // Regular paragraph — single newlines become <br>
       const inner = block.replace(/\n/g, '<br>');
-      return `<p style="margin:0 0 12px 0">${inner}</p>`;
+      return `<p style="margin:0 0 12px 0">${linkify(inner)}</p>`;
     })
     .join('\n');
 }
