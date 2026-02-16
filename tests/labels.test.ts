@@ -78,3 +78,85 @@ describe('handleListLabels', () => {
     expect(result.labels[0].type).toBe('user');
   });
 });
+
+describe('BUG-016: || vs ?? in label type fallback', () => {
+  it('uses ?? to fall back to "user" only for null/undefined, not empty string', async () => {
+    const gmail = {
+      users: {
+        labels: {
+          list: vi.fn().mockResolvedValue({
+            data: {
+              labels: [
+                { id: 'Label1', name: 'Test', type: '' }, // Empty string should NOT fall back
+              ],
+            },
+          }),
+        },
+      },
+    } as any;
+
+    const result = await handleListLabels(gmail);
+
+    // With ??, empty string '' should be preserved (lowercased to '')
+    expect(result.labels[0].type).toBe('');
+  });
+
+  it('falls back to "user" when type is null', async () => {
+    const gmail = {
+      users: {
+        labels: {
+          list: vi.fn().mockResolvedValue({
+            data: {
+              labels: [
+                { id: 'Label2', name: 'Test', type: null },
+              ],
+            },
+          }),
+        },
+      },
+    } as any;
+
+    const result = await handleListLabels(gmail);
+    expect(result.labels[0].type).toBe('user');
+  });
+
+  it('falls back to "user" when type is undefined', async () => {
+    const gmail = {
+      users: {
+        labels: {
+          list: vi.fn().mockResolvedValue({
+            data: {
+              labels: [
+                { id: 'Label3', name: 'Test' }, // type field not present
+              ],
+            },
+          }),
+        },
+      },
+    } as any;
+
+    const result = await handleListLabels(gmail);
+    expect(result.labels[0].type).toBe('user');
+  });
+
+  it('lowercases valid type strings', async () => {
+    const gmail = {
+      users: {
+        labels: {
+          list: vi.fn().mockResolvedValue({
+            data: {
+              labels: [
+                { id: 'Label4', name: 'Test', type: 'SYSTEM' },
+                { id: 'Label5', name: 'Test', type: 'User' },
+              ],
+            },
+          }),
+        },
+      },
+    } as any;
+
+    const result = await handleListLabels(gmail);
+    expect(result.labels[0].type).toBe('system');
+    expect(result.labels[1].type).toBe('user');
+  });
+});

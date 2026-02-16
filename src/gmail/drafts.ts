@@ -172,8 +172,7 @@ export async function handleCreateDraft(
     draft_id: draftRes.data.id,
     message_id: draftRes.data.message?.id,
     thread_id: draftRes.data.message?.threadId,
-    status:
-      'Draft created successfully. It will appear in your Gmail/Superhuman Drafts.',
+    status: 'Draft created.',
   });
 }
 
@@ -277,7 +276,7 @@ export async function handleUpdateDraft(
     draft_id: draftRes.data.id,
     message_id: draftRes.data.message?.id,
     thread_id: draftRes.data.message?.threadId,
-    status: 'Draft updated successfully.',
+    status: 'Draft updated.',
   });
 }
 
@@ -319,7 +318,7 @@ export async function handleListDrafts(
     }));
   }
 
-  return { drafts: results, result_count: results.length };
+  return { drafts: results, count: results.length };
 }
 
 interface DeleteDraftParams {
@@ -337,6 +336,6 @@ export async function handleDeleteDraft(
 
   return {
     draft_id: params.draft_id,
-    status: 'Draft deleted successfully.',
+    status: 'Draft deleted.',
   };
 }

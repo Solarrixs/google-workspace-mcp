@@ -25,6 +25,7 @@ interface StoredTokens {
   refresh_token: string;
   access_token?: string;
   expiry_date?: number;
+  client_hash?: string;
 }
 
 function loadTokens(): StoredTokens {

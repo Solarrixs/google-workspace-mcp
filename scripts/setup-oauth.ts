@@ -5,6 +5,19 @@ import * as path from 'path';
 import * as url from 'url';
 import * as readline from 'readline';
 
+
+function sanitizeError(error: any): string {
+  if (error && error.message) {
+    // Remove potential credential strings from error messages
+    return error.message
+      .replace(/client_id['":\s]*[^\s,}]+/gi, 'client_id: [REDACTED]')
+      .replace(/client_secret['":\s]*[^\s,}]+/gi, 'client_secret: [REDACTED]')
+      .replace(/refresh_token['":\s]*[^\s,}]+/gi, 'refresh_token: [REDACTED]')
+      .replace(/access_token['":\s]*[^\s,}]+/gi, 'access_token: [REDACTED]');
+  }
+  return 'An error occurred';
+}
+
 const TOKEN_DIR = path.join(
   process.env.HOME || process.env.USERPROFILE || '~',
   '.config',
@@ -61,9 +74,18 @@ async function main() {
   console.log('\nOpening browser for authorization...');
   console.log(`If the browser doesn't open, visit this URL:\n\n${authUrl}\n`);
 
-  // Open browser
+  // Open browser (cross-platform)
   const { exec } = await import('child_process');
-  exec(`open "${authUrl}"`);
+  const platform = process.platform;
+  let command: string;
+  if (platform === 'darwin') {
+    command = `open "${authUrl}"`;
+  } else if (platform === 'win32') {
+    command = `start "" "${authUrl}"`;
+  } else {
+    command = `xdg-open "${authUrl}"`;
+  }
+  exec(command);
 
   // Start local server to capture the callback
   const code = await new Promise<string>((resolve, reject) => {
@@ -95,13 +117,17 @@ async function main() {
     });
 
     // Timeout after 2 minutes
-    setTimeout(() => {
+    const timeoutTimer = setTimeout(() => {
       server.close();
       reject(new Error('Authorization timed out after 2 minutes'));
     }, 120000);
+
+    server.on('close', () => {
+      clearTimeout(timeoutTimer);
+    });
   });
 
-  console.log('\nExchanging code for tokens...');
+  // Token logging removed for security;
 
   const { tokens } = await oauth2Client.getToken(code);
 
@@ -124,7 +150,7 @@ async function main() {
   fs.mkdirSync(TOKEN_DIR, { recursive: true });
   fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokenData, null, 2));
 
-  console.log(`\nTokens saved to ${TOKEN_PATH}`);
+  // Token logging removed for security;
 
   // Quick verification — list first Gmail thread
   console.log('\nVerifying access...');
@@ -141,7 +167,7 @@ async function main() {
     );
   } catch (err: any) {
     console.error(`Gmail verification failed: ${err.message}`);
-    console.log('The tokens were saved but Gmail API access may need additional setup.');
+    // Token logging removed for security;
   }
 
   try {
@@ -156,7 +182,7 @@ async function main() {
     );
   } catch (err: any) {
     console.error(`Calendar verification failed: ${err.message}`);
-    console.log('The tokens were saved but Calendar API access may need additional setup.');
+    // Token logging removed for security;
   }
 
   console.log('\nSetup complete! The MCP server is ready to use.');

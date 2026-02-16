@@ -35,18 +35,19 @@ interface DeleteEventParams {
 }
 
 function formatEvent(event: calendar_v3.Schema$Event) {
+  let desc = event.description || '';
+  if (desc.length > 500) {
+    desc = desc.substring(0, 500) + `\n\n[truncated: ${desc.length} chars]`;
+  }
+
   return compact({
     id: event.id,
     summary: event.summary || '',
     start: event.start?.dateTime || event.start?.date || '',
     end: event.end?.dateTime || event.end?.date || '',
-    attendees: (event.attendees || []).map((a) => ({
-      email: a.email,
-      responseStatus: a.responseStatus,
-    })),
+    attendees: (event.attendees || []).map((a) => a.email).filter((email): email is string => !!email),
     location: event.location || '',
-    description: event.description || '',
-    htmlLink: event.htmlLink || '',
+    description: desc,
   });
 }
 
@@ -129,5 +130,5 @@ export async function handleDeleteEvent(
     eventId: params.event_id,
   });
 
-  return compact({ status: `Event ${params.event_id} deleted successfully.` });
+  return compact({ status: `Event ${params.event_id} deleted.` });
 }

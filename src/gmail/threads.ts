@@ -281,7 +281,7 @@ export async function handleListThreads(
   return {
     threads,
     next_page_token: listRes.data.nextPageToken || null,
-    result_count: threads.length,
+    count: threads.length,
   };
 }
 
@@ -309,8 +309,8 @@ export async function handleGetThread(
     if (bodyText) {
       bodyText = stripQuotedText(bodyText);
       bodyText = stripSignature(bodyText);
-      if (bodyText.length > 4000) {
-        bodyText = bodyText.substring(0, 4000) + '\n\n[truncated]';
+      if (bodyText.length > 2500) {
+        bodyText = bodyText.substring(0, 2500) + '\n\n[truncated: ' + bodyText.length + ' chars]';
       }
     }
 

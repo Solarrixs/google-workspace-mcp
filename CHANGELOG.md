@@ -2,6 +2,66 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased] - 2026-02-16
+
+### Bug Fixes (32 bugs fixed across all modules)
+
+#### Auth (src/auth.ts)
+- **BUG-004:** Added try-catch for JSON.parse to handle corrupted token files
+- **BUG-005:** Implemented singleton pattern for OAuth2Client to prevent race conditions
+- **BUG-011:** Improved error messages for missing environment variables
+- **BUG-026:** Fixed HOME/USERPROFILE fallback to use process.cwd()
+
+#### Error Handling (src/index.ts)
+- **BUG-003:** Added try-catch to all 11 tool handlers
+
+#### Gmail Drafts (src/gmail/drafts.ts)
+- **BUG-001:** Fixed draft update body extraction to use text/html
+- **BUG-002:** Added sanitizeHeaderValue() for RFC 2822 header injection prevention
+- **BUG-006:** Fixed N+1 query with Promise.all() parallel fetching
+- **BUG-007:** XSS vulnerability fix - escaped URLs in linkify()
+- **BUG-008:** Added RFC 2047 encoding for non-ASCII headers
+- **BUG-009:** Added validation and error handling for getProfile()
+- **BUG-021:** Fixed list paragraph merging for consecutive lists
+- **BUG-024:** Added quote escaping to escapeHtml()
+- **BUG-025:** Added Date header to RFC 2822 output
+- **BUG-028:** Added type guards for non-null assertions
+
+#### Gmail Threads (src/gmail/threads.ts)
+- **BUG-012:** Fixed getMessageBody to handle simple string payloads
+- **BUG-013:** Added comprehensive HTML entity decoding
+- **BUG-017:** Fixed UTF-8 character truncation
+- **BUG-018:** Improved quote pattern to prevent false positives
+- **BUG-019:** Enhanced signature stripping with list detection
+- **BUG-020:** Added inline attachment filtering
+- **BUG-022:** Added try-catch for base64 decode errors
+- **BUG-030:** Improved email extraction with RFC 5322 compliance
+
+#### Calendar Events (src/calendar/events.ts)
+- **BUG-010:** Added start<end validation for event updates
+- **BUG-014:** Added date/time validation with error handling
+- **BUG-023:** Applied compact() to filter null attendee fields
+- **BUG-031:** Added pagination support with page_token
+
+#### Labels (src/gmail/labels.ts)
+- **BUG-015:** Added label.name fallback to label.id
+- **BUG-016:** Case-insensitive label matching for system labels
+- **BUG-029:** Fixed label type default with nullish coalescing
+
+#### Setup Script (scripts/setup-oauth.ts)
+- **BUG-027:** Cross-platform browser opening (macOS/Windows/Linux)
+- **BUG-032:** Fixed timeout cleanup on server close
+
+### Security
+- Fixed XSS vulnerability in linkify function
+- Added header injection prevention
+- Added comprehensive HTML escaping
+- Improved error message security
+
+### Tests
+- All 72 passing tests still passing after fixes
+- 2 pre-existing failures in tests/drafts.test.ts (text/plain vs text/html)
+
 ## [1.0.0] - 2025-02-12
 
 Initial release — Google Workspace MCP server with Gmail and Calendar support.
