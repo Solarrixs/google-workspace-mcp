@@ -24,15 +24,16 @@ No vitest config file — uses Vitest defaults. Build is required before `npm st
 
 ## Architecture
 
-**Entry point**: `src/index.ts` — Creates `McpServer`, registers all 11 tools with Zod schemas, connects via `StdioServerTransport`. All tool handlers follow the same pattern:
+**Entry point**: `src/index.ts` — Creates `McpServer`, registers all 12 tools with Zod schemas, connects via `StdioServerTransport`. All tool handlers follow the same pattern:
 ```
 server.tool(name, description, zodSchema, async (params) => {
-  const client = getGmailClient() | getCalendarClient();
-  const result = await handler(client, params);
+  const { account, ...handlerParams } = params;
+  const client = getGmailClient(account) | getCalendarClient(account);
+  const result = await handler(client, handlerParams);
   return { content: [{ type: 'text', text: JSON.stringify(result) }] };
 })
 ```
-No pre/post-processing in index.ts — params pass directly to handlers, results are JSON-stringified.
+Every tool accepts an optional `account` parameter (alias like "work", "personal") to select which Google account to use. Defaults to the primary account. The `list_accounts` tool returns configured accounts and the default.
 
 **Module dependency graph**:
 ```
@@ -42,13 +43,31 @@ src/auth.ts (standalone — OAuth2 client factory)
 src/gmail/labels.ts (standalone)
 ```
 
-### Auth (`src/auth.ts`)
+### Auth (`src/auth.ts`) — Multi-Account
 
-OAuth2 client factory with two credential sources (file takes precedence):
-1. **Token file**: `~/.config/google-workspace-mcp/tokens.json` — contains `client_id`, `client_secret`, `refresh_token`, `access_token`, `expiry_date`
-2. **Env vars** (fallback): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`
+Supports multiple Google accounts identified by short aliases (e.g., "work", "personal"). Each tool accepts an optional `account` param; omitting it uses the default.
 
-Auto-refresh: listens on `oauth2Client.on('tokens', ...)`, merges new access tokens, persists to disk. Scopes: `gmail.readonly`, `gmail.compose`, `gmail.labels`, `calendar`.
+**Token file format** (v2): `~/.config/google-workspace-mcp/tokens.json`
+```json
+{
+  "version": 2,
+  "default_account": "work",
+  "accounts": {
+    "work": { "client_id": "...", "client_secret": "...", "refresh_token": "...", "email": "..." },
+    "personal": { ... }
+  }
+}
+```
+
+**Legacy migration**: Old flat `tokens.json` (no `version` field) is auto-migrated to v2 on first read, wrapped as account `"default"`.
+
+**Credential sources** (file takes precedence):
+1. **Token file** (v2 multi-account or legacy auto-migrated)
+2. **Env vars** (fallback): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` — creates in-memory `"env"` alias (not written to disk)
+
+**Key functions**: `getAuthClient(account?)`, `getGmailClient(account?)`, `getCalendarClient(account?)`, `listAccounts()`.
+
+Auto-refresh: listens on `oauth2Client.on('tokens', ...)`, merges new access tokens into the correct account slot, persists to disk. Scopes: `gmail.readonly`, `gmail.compose`, `gmail.labels`, `calendar`.
 
 ### Email Text Pipeline (`src/gmail/threads.ts`)
 

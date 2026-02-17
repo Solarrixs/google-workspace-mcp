@@ -34,6 +34,21 @@ const SCOPES = [
 
 const REDIRECT_URI = 'http://localhost:3000/oauth2callback';
 
+interface StoredTokens {
+  client_id: string;
+  client_secret: string;
+  refresh_token: string;
+  access_token?: string | null;
+  expiry_date?: number | null;
+  email?: string;
+}
+
+interface MultiAccountTokenFile {
+  version: 2;
+  default_account: string;
+  accounts: Record<string, StoredTokens>;
+}
+
 async function prompt(question: string): Promise<string> {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -45,6 +60,22 @@ async function prompt(question: string): Promise<string> {
       resolve(answer.trim());
     });
   });
+}
+
+function loadExistingStore(): MultiAccountTokenFile | null {
+  if (!fs.existsSync(TOKEN_PATH)) return null;
+  try {
+    const data = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8'));
+    if (data.version === 2) return data as MultiAccountTokenFile;
+    // Legacy format
+    return {
+      version: 2,
+      default_account: 'default',
+      accounts: { default: data },
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function main() {
@@ -61,6 +92,36 @@ async function main() {
   if (!clientId || !clientSecret) {
     console.error('Client ID and Client Secret are required.');
     process.exit(1);
+  }
+
+  // Prompt for account alias
+  const ALIAS_REGEX = /^[a-z0-9][a-z0-9-]*$/;
+  let alias = '';
+  while (!alias) {
+    const input = (await prompt('Enter an alias for this account (e.g., "work", "personal"): ')).toLowerCase();
+    if (!input) {
+      console.error('Alias is required.');
+      continue;
+    }
+    if (input.length > 30) {
+      console.error('Alias must be 30 characters or fewer.');
+      continue;
+    }
+    if (!ALIAS_REGEX.test(input)) {
+      console.error('Alias must start with a letter or number and contain only lowercase letters, numbers, and hyphens.');
+      continue;
+    }
+    alias = input;
+  }
+
+  // Check for existing account with same alias
+  const existingStore = loadExistingStore();
+  if (existingStore && existingStore.accounts[alias]) {
+    const overwrite = await prompt(`Account "${alias}" already exists. Overwrite? (y/n): `);
+    if (overwrite.toLowerCase() !== 'y') {
+      console.log('Setup cancelled.');
+      process.exit(0);
+    }
   }
 
   const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, REDIRECT_URI);
@@ -127,8 +188,6 @@ async function main() {
     });
   });
 
-  // Token logging removed for security;
-
   const { tokens } = await oauth2Client.getToken(code);
 
   if (!tokens.refresh_token) {
@@ -138,8 +197,8 @@ async function main() {
     process.exit(1);
   }
 
-  // Save tokens
-  const tokenData = {
+  // Build token data for this account
+  const tokenData: StoredTokens = {
     client_id: clientId,
     client_secret: clientSecret,
     refresh_token: tokens.refresh_token,
@@ -147,15 +206,17 @@ async function main() {
     expiry_date: tokens.expiry_date,
   };
 
-  fs.mkdirSync(TOKEN_DIR, { recursive: true });
-  fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokenData, null, 2));
-
-  // Token logging removed for security;
-
-  // Quick verification — list first Gmail thread
+  // Capture email during verification
   console.log('\nVerifying access...');
   oauth2Client.setCredentials(tokens);
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+  try {
+    const profile = await gmail.users.getProfile({ userId: 'me' });
+    tokenData.email = profile.data.emailAddress || undefined;
+  } catch (err: any) {
+    // Non-fatal — email is optional metadata
+  }
 
   try {
     const res = await gmail.users.threads.list({
@@ -167,7 +228,6 @@ async function main() {
     );
   } catch (err: any) {
     console.error(`Gmail verification failed: ${err.message}`);
-    // Token logging removed for security;
   }
 
   try {
@@ -182,9 +242,43 @@ async function main() {
     );
   } catch (err: any) {
     console.error(`Calendar verification failed: ${err.message}`);
-    // Token logging removed for security;
   }
 
+  // Save in multi-account format
+  let store: MultiAccountTokenFile;
+  if (existingStore) {
+    store = existingStore;
+  } else {
+    store = {
+      version: 2,
+      default_account: alias,
+      accounts: {},
+    };
+  }
+
+  store.accounts[alias] = tokenData;
+
+  // First account becomes default; for subsequent accounts, ask
+  const accountCount = Object.keys(store.accounts).length;
+  if (accountCount === 1) {
+    store.default_account = alias;
+  } else if (accountCount > 1 && store.default_account !== alias) {
+    const makeDefault = await prompt(`Make "${alias}" the default account? (y/n): `);
+    if (makeDefault.toLowerCase() === 'y') {
+      store.default_account = alias;
+    }
+  }
+
+  fs.mkdirSync(TOKEN_DIR, { recursive: true });
+  fs.writeFileSync(TOKEN_PATH, JSON.stringify(store, null, 2));
+
+  // Print summary
+  const emailSuffix = tokenData.email ? ` (${tokenData.email})` : '';
+  console.log(`\nAccount "${alias}"${emailSuffix} saved successfully.`);
+  const allAliases = Object.keys(store.accounts).map(
+    a => a === store.default_account ? `${a} (default)` : a
+  );
+  console.log(`Configured accounts: ${allAliases.join(', ')}`);
   console.log('\nSetup complete! The MCP server is ready to use.');
 }
 

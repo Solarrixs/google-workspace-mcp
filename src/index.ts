@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { getGmailClient, getCalendarClient } from './auth.js';
+import { getGmailClient, getCalendarClient, listAccounts } from './auth.js';
 import {
   handleListThreads,
   handleGetThread,
@@ -26,10 +26,35 @@ function stripControlChars(value: string): string {
   return value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 }
 
+const accountParam = z.string().optional().describe(
+  'Account alias (e.g., "work", "personal"). Defaults to primary account. Use list_accounts to see available accounts.'
+);
+
 const server = new McpServer({
   name: 'google-workspace',
   version: '1.0.0',
 });
+
+// --- Account Tool ---
+
+server.tool(
+  'list_accounts',
+  'List configured Google accounts and the default. Use to discover account aliases.',
+  {},
+  async () => {
+    try {
+      const result = listAccounts();
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error occurred' })
+        }]
+      };
+    }
+  }
+);
 
 // --- Gmail Tools ---
 
@@ -40,11 +65,13 @@ server.tool(
     query: z.string().optional().transform(v => v ? stripControlChars(validateStringSize(v, 2000, 'query')) : v).describe('Gmail search query (e.g., "is:inbox", "newer_than:14d", "from:me")'),
     max_results: z.number().min(1).max(100).optional().describe('Max threads to return (default: 25)'),
     page_token: z.string().optional().describe('Pagination token for next page'),
+    account: accountParam,
   },
   async (params) => {
     try {
-      const gmail = getGmailClient();
-      const result = await handleListThreads(gmail, params);
+      const { account, ...handlerParams } = params;
+      const gmail = getGmailClient(account);
+      const result = await handleListThreads(gmail, handlerParams);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       return {
@@ -63,11 +90,13 @@ server.tool(
   {
     thread_id: z.string().describe('Gmail thread ID'),
     format: z.enum(['full', 'minimal']).optional().describe('full (default) includes message bodies, minimal does not'),
+    account: accountParam,
   },
   async (params) => {
     try {
-      const gmail = getGmailClient();
-      const result = await handleGetThread(gmail, params);
+      const { account, ...handlerParams } = params;
+      const gmail = getGmailClient(account);
+      const result = await handleGetThread(gmail, handlerParams);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       return {
@@ -91,11 +120,13 @@ server.tool(
     in_reply_to: z.string().optional().describe('Message-ID of the message being replied to'),
     cc: z.string().optional().describe('CC recipients'),
     bcc: z.string().optional().describe('BCC recipients'),
+    account: accountParam,
   },
   async (params) => {
     try {
-      const gmail = getGmailClient();
-      const result = await handleCreateDraft(gmail, params);
+      const { account, ...handlerParams } = params;
+      const gmail = getGmailClient(account);
+      const result = await handleCreateDraft(gmail, handlerParams);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       return {
@@ -120,11 +151,13 @@ server.tool(
     in_reply_to: z.string().optional().describe('Message-ID of the message being replied to'),
     cc: z.string().optional().describe('New CC recipients'),
     bcc: z.string().optional().describe('New BCC recipients'),
+    account: accountParam,
   },
   async (params) => {
     try {
-      const gmail = getGmailClient();
-      const result = await handleUpdateDraft(gmail, params);
+      const { account, ...handlerParams } = params;
+      const gmail = getGmailClient(account);
+      const result = await handleUpdateDraft(gmail, handlerParams);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       return {
@@ -142,11 +175,13 @@ server.tool(
   'Permanently delete a draft email.',
   {
     draft_id: z.string().describe('Draft ID to delete (returned by gmail_create_draft)'),
+    account: accountParam,
   },
   async (params) => {
     try {
-      const gmail = getGmailClient();
-      const result = await handleDeleteDraft(gmail, params);
+      const { account, ...handlerParams } = params;
+      const gmail = getGmailClient(account);
+      const result = await handleDeleteDraft(gmail, handlerParams);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       return {
@@ -164,11 +199,13 @@ server.tool(
   'List all draft emails with their draft IDs, subjects, and recipients.',
   {
     max_results: z.number().min(1).max(100).optional().describe('Max drafts to return (default: 25)'),
+    account: accountParam,
   },
   async (params) => {
     try {
-      const gmail = getGmailClient();
-      const result = await handleListDrafts(gmail, params);
+      const { account, ...handlerParams } = params;
+      const gmail = getGmailClient(account);
+      const result = await handleListDrafts(gmail, handlerParams);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       return {
@@ -184,10 +221,13 @@ server.tool(
 server.tool(
   'gmail_list_labels',
   'List all Gmail labels (including Superhuman auto-labels).',
-  {},
-  async () => {
+  {
+    account: accountParam,
+  },
+  async (params) => {
     try {
-      const gmail = getGmailClient();
+      const { account } = params;
+      const gmail = getGmailClient(account);
       const result = await handleListLabels(gmail);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
@@ -211,11 +251,13 @@ server.tool(
     time_max: z.string().optional().describe('ISO 8601 end time (default: 7 days from now)'),
     max_results: z.number().min(1).max(100).optional().describe('Max events (default: 25)'),
     calendar_id: z.string().optional().describe('Calendar ID (default: primary)'),
+    account: accountParam,
   },
   async (params) => {
     try {
-      const calendar = getCalendarClient();
-      const result = await handleListEvents(calendar, params);
+      const { account, ...handlerParams } = params;
+      const calendar = getCalendarClient(account);
+      const result = await handleListEvents(calendar, handlerParams);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       return {
@@ -239,11 +281,13 @@ server.tool(
     attendees: z.array(z.string()).optional().describe('Attendee email addresses'),
     location: z.string().optional().describe('Event location'),
     calendar_id: z.string().optional().describe('Calendar ID (default: primary)'),
+    account: accountParam,
   },
   async (params) => {
     try {
-      const calendar = getCalendarClient();
-      const result = await handleCreateEvent(calendar, params);
+      const { account, ...handlerParams } = params;
+      const calendar = getCalendarClient(account);
+      const result = await handleCreateEvent(calendar, handlerParams);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       return {
@@ -268,11 +312,13 @@ server.tool(
     attendees: z.array(z.string()).optional().describe('New attendee list'),
     location: z.string().optional().describe('New location'),
     calendar_id: z.string().optional().describe('Calendar ID (default: primary)'),
+    account: accountParam,
   },
   async (params) => {
     try {
-      const calendar = getCalendarClient();
-      const result = await handleUpdateEvent(calendar, params);
+      const { account, ...handlerParams } = params;
+      const calendar = getCalendarClient(account);
+      const result = await handleUpdateEvent(calendar, handlerParams);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       return {
@@ -291,11 +337,13 @@ server.tool(
   {
     event_id: z.string().describe('Event ID to delete'),
     calendar_id: z.string().optional().describe('Calendar ID (default: primary)'),
+    account: accountParam,
   },
   async (params) => {
     try {
-      const calendar = getCalendarClient();
-      const result = await handleDeleteEvent(calendar, params);
+      const { account, ...handlerParams } = params;
+      const calendar = getCalendarClient(account);
+      const result = await handleDeleteEvent(calendar, handlerParams);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       return {

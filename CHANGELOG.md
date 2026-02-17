@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased] - 2026-02-16
 
+### Multi-Account Support
+- **Auth (`src/auth.ts`):** Added multi-account support with short aliases (e.g., "work", "personal"). New v2 token file format stores multiple accounts with a configurable default. Legacy single-account `tokens.json` auto-migrates to v2 on first read. Env var fallback creates in-memory `"env"` alias.
+- **All 12 tools (`src/index.ts`):** Every tool now accepts optional `account` parameter to select which Google account to use. Omitting it uses the default account.
+- **New tool: `list_accounts`** — Returns configured accounts with aliases, emails, and which is default.
+- **Setup (`scripts/setup-oauth.ts`):** Now prompts for account alias, validates format, detects existing aliases, captures email during verification, saves in v2 multi-account format. Run again to add more accounts.
+- **Tests (`tests/auth.test.ts`):** 24 tests covering v2 format, legacy migration, account resolution, env var fallback, per-account token refresh, `listAccounts()`, and error messages. Fixed vi.mock hoisting bug.
+
 ### Bug Fixes (32 bugs fixed across all modules)
 
 #### Auth (src/auth.ts)
@@ -70,13 +77,15 @@ Initial release — Google Workspace MCP server with Gmail and Calendar support.
 
 **MCP Server Core**
 - MCP server using `@modelcontextprotocol/sdk` with `StdioServerTransport`
-- 11 tools registered with Zod parameter validation
+- 12 tools registered with Zod parameter validation (11 workspace + `list_accounts`)
 - All responses returned as JSON-stringified text content
 
 **Authentication (`src/auth.ts`)**
-- OAuth2 client with dual credential sources: token file (`~/.config/google-workspace-mcp/tokens.json`) or environment variables
-- Automatic access token refresh with disk persistence via `oauth2Client.on('tokens', ...)`
-- Factory functions: `getAuthClient()`, `getGmailClient()`, `getCalendarClient()`
+- Multi-account OAuth2 client with v2 token file format supporting multiple accounts by alias
+- Credential sources: v2 multi-account token file (`~/.config/google-workspace-mcp/tokens.json`) or env vars (fallback)
+- Automatic access token refresh with per-account disk persistence
+- Factory functions: `getAuthClient(account?)`, `getGmailClient(account?)`, `getCalendarClient(account?)`, `listAccounts()`
+- Auto-migration from legacy single-account format to v2
 - Scopes: `gmail.readonly`, `gmail.compose`, `gmail.labels`, `calendar`
 
 **Gmail — Threads (`src/gmail/threads.ts`)**
@@ -106,8 +115,9 @@ Initial release — Google Workspace MCP server with Gmail and Calendar support.
 - Smart date parsing: `YYYY-MM-DD` → all-day event, ISO 8601 datetime → timed event
 
 **Setup (`scripts/setup-oauth.ts`)**
-- Interactive OAuth wizard: prompts for credentials, opens browser, starts local callback server on port 3000
-- Token exchange and persistence to `~/.config/google-workspace-mcp/tokens.json`
+- Interactive OAuth wizard: prompts for credentials and account alias, opens browser, starts local callback server on port 3000
+- Token exchange and persistence to `~/.config/google-workspace-mcp/tokens.json` in v2 multi-account format
+- Captures email address during verification for account identification
 - Post-setup verification of Gmail and Calendar API access
 
 **Testing**

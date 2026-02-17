@@ -26,13 +26,43 @@ interface StoredTokens {
   access_token?: string;
   expiry_date?: number;
   client_hash?: string;
+  email?: string;
 }
 
-function loadTokens(): StoredTokens {
+interface MultiAccountTokenFile {
+  version: 2;
+  default_account: string;
+  accounts: Record<string, StoredTokens>;
+}
+
+function loadAccountStore(): MultiAccountTokenFile {
   // First try tokens.json file
   if (fs.existsSync(TOKEN_PATH)) {
-    const data = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8'));
-    return data;
+    let data: any;
+    try {
+      data = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8'));
+    } catch (e) {
+      throw new Error(
+        `Failed to parse tokens file at ${TOKEN_PATH}. The file may be corrupted. ` +
+        `Delete it and run 'npm run setup' to reconfigure.`
+      );
+    }
+
+    // v2 multi-account format
+    if (data.version === 2) {
+      return data as MultiAccountTokenFile;
+    }
+
+    // Legacy flat format — auto-migrate to v2
+    const legacy = data as StoredTokens;
+    const migrated: MultiAccountTokenFile = {
+      version: 2,
+      default_account: 'default',
+      accounts: { default: legacy },
+    };
+    fs.mkdirSync(TOKEN_DIR, { recursive: true });
+    fs.writeFileSync(TOKEN_PATH, JSON.stringify(migrated, null, 2));
+    return migrated;
   }
 
   // Fall back to environment variables
@@ -42,24 +72,87 @@ function loadTokens(): StoredTokens {
 
   if (clientId && clientSecret && refreshToken) {
     return {
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
+      version: 2,
+      default_account: 'env',
+      accounts: {
+        env: {
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: refreshToken,
+        },
+      },
     };
   }
 
+  // Identify which env vars are missing for a helpful error
+  const missing: string[] = [];
+  if (!clientId) missing.push('GOOGLE_CLIENT_ID');
+  if (!clientSecret) missing.push('GOOGLE_CLIENT_SECRET');
+  if (!refreshToken) missing.push('GOOGLE_REFRESH_TOKEN');
+
   throw new Error(
-    `No credentials found. Run 'npm run setup' first, or set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN environment variables.`
+    `No credentials found. Missing environment variables: ${missing.join(', ')}. ` +
+    `Run 'npm run setup' first, or set all required environment variables.`
   );
 }
 
-function saveTokens(tokens: StoredTokens): void {
-  fs.mkdirSync(TOKEN_DIR, { recursive: true });
-  fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens, null, 2));
+function resolveAccountAlias(
+  store: MultiAccountTokenFile,
+  account?: string
+): { alias: string; tokens: StoredTokens } {
+  const alias = account || store.default_account;
+  const tokens = store.accounts[alias];
+  if (!tokens) {
+    const available = Object.keys(store.accounts).join(', ');
+    throw new Error(
+      `Account "${alias}" not found. Available accounts: ${available}. Run 'npm run setup' to add a new account.`
+    );
+  }
+  return { alias, tokens };
 }
 
-export function getAuthClient(): OAuth2Client {
-  const tokens = loadTokens();
+function loadTokens(account?: string): { alias: string; tokens: StoredTokens } {
+  const store = loadAccountStore();
+  return resolveAccountAlias(store, account);
+}
+
+function saveTokens(tokens: StoredTokens, account: string): void {
+  let store: MultiAccountTokenFile;
+
+  if (fs.existsSync(TOKEN_PATH)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8'));
+      if (data.version === 2) {
+        store = data;
+      } else {
+        store = {
+          version: 2,
+          default_account: 'default',
+          accounts: { default: data },
+        };
+      }
+    } catch {
+      store = {
+        version: 2,
+        default_account: account,
+        accounts: {},
+      };
+    }
+  } else {
+    store = {
+      version: 2,
+      default_account: account,
+      accounts: {},
+    };
+  }
+
+  store.accounts[account] = tokens;
+  fs.mkdirSync(TOKEN_DIR, { recursive: true });
+  fs.writeFileSync(TOKEN_PATH, JSON.stringify(store, null, 2));
+}
+
+export function getAuthClient(account?: string): OAuth2Client {
+  const { alias, tokens } = loadTokens(account);
 
   const oauth2Client = new google.auth.OAuth2(
     tokens.client_id,
@@ -83,16 +176,25 @@ export function getAuthClient(): OAuth2Client {
     if (newTokens.refresh_token) {
       updated.refresh_token = newTokens.refresh_token;
     }
-    saveTokens(updated);
+    saveTokens(updated, alias);
   });
 
   return oauth2Client;
 }
 
-export function getGmailClient() {
-  return google.gmail({ version: 'v1', auth: getAuthClient() });
+export function getGmailClient(account?: string) {
+  return google.gmail({ version: 'v1', auth: getAuthClient(account) });
 }
 
-export function getCalendarClient() {
-  return google.calendar({ version: 'v3', auth: getAuthClient() });
+export function getCalendarClient(account?: string) {
+  return google.calendar({ version: 'v3', auth: getAuthClient(account) });
+}
+
+export function listAccounts(): { accounts: { alias: string; email?: string }[]; default_account: string } {
+  const store = loadAccountStore();
+  const accounts = Object.entries(store.accounts).map(([alias, tokens]) => ({
+    alias,
+    email: tokens.email,
+  }));
+  return { accounts, default_account: store.default_account };
 }

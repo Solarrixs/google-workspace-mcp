@@ -34,10 +34,13 @@ npm run setup
 
 This will:
 1. Prompt you for your OAuth Client ID and Client Secret
-2. Open a browser window for Google authorization
-3. Start a local callback server on `http://localhost:3000/oauth2callback`
-4. Save tokens to `~/.config/google-workspace-mcp/tokens.json`
-5. Verify Gmail and Calendar API access
+2. Prompt you for an **account alias** (e.g., "work", "personal")
+3. Open a browser window for Google authorization
+4. Start a local callback server on `http://localhost:3000/oauth2callback`
+5. Save tokens to `~/.config/google-workspace-mcp/tokens.json` in multi-account format
+6. Verify Gmail and Calendar API access
+
+Run `npm run setup` again to add more accounts. The first account becomes the default.
 
 > **Redirect URI**: Make sure `http://localhost:3000/oauth2callback` is listed as an authorized redirect URI in your Google Cloud Console OAuth credentials.
 
@@ -59,20 +62,23 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
   "mcpServers": {
     "google-workspace": {
       "command": "node",
-      "args": ["/absolute/path/to/google-workspace-mcp/dist/index.js"],
-      "env": {
-        "GOOGLE_CLIENT_ID": "your-client-id.apps.googleusercontent.com",
-        "GOOGLE_CLIENT_SECRET": "your-client-secret",
-        "GOOGLE_REFRESH_TOKEN": "your-refresh-token"
-      }
+      "args": ["/absolute/path/to/google-workspace-mcp/dist/index.js"]
     }
   }
 }
 ```
 
-The env vars are only needed if you haven't run `npm run setup` (which saves tokens to a file instead). If the token file exists, it takes precedence over env vars.
+Credentials are loaded from `~/.config/google-workspace-mcp/tokens.json` (created by `npm run setup`). Environment variables (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`) are supported as a fallback for single-account use but `npm run setup` is the recommended approach.
 
 ## Available Tools
+
+All tools accept an optional `account` parameter to select which Google account to use (e.g., `account: "work"`). Omit it to use the default account.
+
+### Account Management
+
+| Tool | Description |
+|------|-------------|
+| `list_accounts` | List configured Google accounts and the default. Use to discover available account aliases |
 
 ### Gmail
 
@@ -116,8 +122,8 @@ npx vitest run tests/drafts.test.ts   # Run a single test file
 
 ```
 src/
-├── index.ts              # MCP server — tool registration and transport
-├── auth.ts               # OAuth2 client factory, token management
+├── index.ts              # MCP server — 12 tools with account param, transport
+├── auth.ts               # Multi-account OAuth2 factory, token migration, account resolution
 ├── utils.ts              # compact() utility
 ├── gmail/
 │   ├── threads.ts        # Thread list/get with text processing pipeline

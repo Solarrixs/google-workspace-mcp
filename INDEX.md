@@ -8,7 +8,6 @@ Directory and file reference for agents navigating this codebase.
 |------|---------|
 | `package.json` | Dependencies, scripts (`build`, `test`, `start`, `setup`) |
 | `tsconfig.json` | TypeScript config — strict, ES2022, Node16 modules, `src/` → `dist/` |
-| `.env.example` | Template for OAuth env vars (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`) |
 | `.gitignore` | Ignores `.env`, `dist/`, `credentials.json`, `token.json` |
 | `run-tests.mjs` | Custom test runner — invokes `vitest run --reporter=verbose` with 60s timeout |
 | `LICENSE` | MIT |
@@ -22,8 +21,8 @@ Directory and file reference for agents navigating this codebase.
 
 | File | What it does | Exports |
 |------|--------------|---------|
-| `index.ts` | MCP server entry point. Registers all 11 tools with Zod schemas, connects via `StdioServerTransport`. | — (main) |
-| `auth.ts` | OAuth2 client factory. Loads tokens from file or env vars, auto-refreshes. | `getAuthClient()`, `getGmailClient()`, `getCalendarClient()` |
+| `index.ts` | MCP server entry point. Registers all 12 tools (11 workspace + `list_accounts`) with Zod schemas, connects via `StdioServerTransport`. Every tool accepts optional `account` param. | — (main) |
+| `auth.ts` | Multi-account OAuth2 client factory. Loads tokens from v2 multi-account file or env vars, auto-migrates legacy format, auto-refreshes per-account. | `getAuthClient(account?)`, `getGmailClient(account?)`, `getCalendarClient(account?)`, `listAccounts()` |
 | `utils.ts` | Shared utility. | `compact()` — strips empty/null/undefined values and empty arrays from objects |
 | `gmail/threads.ts` | Thread listing and reading. Full email text pipeline: MIME extraction → HTML stripping → quote stripping → signature stripping → truncation. | `handleListThreads()`, `handleGetThread()`, `decodeBase64Url()`, `getHeader()`, `extractEmailAddresses()`, `getMessageBody()`, `stripHtmlTags()`, `stripQuotedText()`, `stripSignature()`, `getAttachments()` |
 | `gmail/drafts.ts` | Draft CRUD. Builds RFC 2822 emails, converts plain text to styled HTML, auto-resolves threading headers. | `handleCreateDraft()`, `handleUpdateDraft()`, `handleListDrafts()`, `handleDeleteDraft()`, `buildRawEmail()` |
@@ -38,6 +37,7 @@ Directory and file reference for agents navigating this codebase.
 | `drafts.test.ts` | `buildRawEmail()` RFC 2822 output, `handleCreateDraft()` with threading auto-resolution. |
 | `calendar.test.ts` | All four calendar handlers (list, create, update, delete). Tests date-only vs datetime, compact field removal. |
 | `labels.test.ts` | `handleListLabels()` with system/user labels, empty results, type lowercasing. |
+| `auth.test.ts` | Multi-account auth: v2 format parsing, legacy auto-migration, account resolution, env var fallback, token refresh per-account, `listAccounts()`, error messages. |
 
 All tests call handler functions directly (not through MCP server layer). Each file defines its own mock factory function.
 
@@ -45,7 +45,7 @@ All tests call handler functions directly (not through MCP server layer). Each f
 
 | File | Purpose |
 |------|---------|
-| `setup-oauth.ts` | Interactive OAuth wizard. Prompts for credentials, opens browser, starts callback server on `:3000`, exchanges auth code for tokens, saves to `~/.config/google-workspace-mcp/tokens.json`. |
+| `setup-oauth.ts` | Interactive OAuth wizard. Prompts for credentials and account alias, opens browser, starts callback server on `:3000`, exchanges auth code for tokens, captures email, saves in multi-account v2 format to `~/.config/google-workspace-mcp/tokens.json`. Supports adding multiple accounts. |
 
 ## `dist/` — Build Output (gitignored)
 
@@ -55,4 +55,4 @@ Compiled JavaScript from `tsc`. Entry point: `dist/index.js`. Must run `npm run 
 
 | Path | Purpose |
 |------|---------|
-| `~/.config/google-workspace-mcp/tokens.json` | Persisted OAuth tokens (client_id, client_secret, refresh_token, access_token, expiry_date) |
+| `~/.config/google-workspace-mcp/tokens.json` | Multi-account token store (v2 format: `version`, `default_account`, `accounts` map with per-alias `client_id`, `client_secret`, `refresh_token`, `access_token`, `expiry_date`, `email`) |

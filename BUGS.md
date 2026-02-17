@@ -18,7 +18,7 @@ Known bugs and unfinished implementations, prioritized by severity. Each entry i
 **Impact:** Complete loss of draft body content. User sees blank email.
 **Likelihood:** Very high — happens on every partial update.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -38,64 +38,49 @@ Bcc: attacker@evil.com
 **Impact:** Arbitrary header injection — hidden recipients, spoofed headers, body manipulation.
 **Likelihood:** Medium-high. Exploitable if inputs come from untrusted sources.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
 ### BUG-003: No error handling on any API call
 **File:** `src/index.ts`
-**Lines:** All 11 tool registrations (25-38, 40-52, 54-71, 73-91, 93-104, 106-117, 119-128, 132-146, 148-165, 167-185, 187-199)
+**Lines:** All 12 tool registrations
 
-Every tool handler follows the same pattern:
-```typescript
-async (params) => {
-  const client = getGmailClient(); // or getCalendarClient()
-  const result = await handler(client, params);
-  return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-}
-```
-
-No try-catch anywhere. API errors (401 auth expired, 404 not found, 429 rate limit, network timeout) propagate as unhandled exceptions. The MCP server returns cryptic stack traces instead of user-friendly error messages.
+All tools now have try-catch blocks. Each handler destructures the `account` parameter, passes it to `getGmailClient(account)` / `getCalendarClient(account)`, and wraps errors in JSON responses.
 
 **Triggers:** Any API failure — network down, token expired, invalid resource ID, quota exceeded.
-**Impact:** Server crashes or returns unhelpful errors. No graceful degradation.
+**Impact:** Previously: crash with stack trace. Now: JSON error response.
 **Likelihood:** Very high — API failures are routine in production.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
 ### BUG-004: Token file corruption crashes server on startup
 **File:** `src/auth.ts`
-**Line:** 33
+**Function:** `loadAccountStore()`
 
-```typescript
-const data = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8'));
-```
-
-No try-catch. If `tokens.json` contains invalid JSON (partial write from crash, disk corruption, manual edit), the server crashes immediately with `SyntaxError` and cannot start. No recovery path — user must manually delete or fix the file.
+`tokens.json` (v2 multi-account format) is parsed with try-catch in `loadAccountStore()`. If the file contains invalid JSON, throws a helpful error with the file path and recovery instructions.
 
 **Triggers:** Corrupted `~/.config/google-workspace-mcp/tokens.json`.
-**Impact:** Server won't start. No error message pointing to the corrupt file.
+**Impact:** Previously: crash with raw SyntaxError. Now: clear error message.
 **Likelihood:** Medium-high. File corruption is common from crashes during token refresh writes (see BUG-005).
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
 ### BUG-005: Race condition in token refresh
 **File:** `src/auth.ts`
-**Lines:** 60-89 (getAuthClient), 76-86 (tokens event handler), 92-96 (factory functions)
+**Functions:** `getAuthClient(account?)`, `saveTokens(tokens, account)`
 
-`getAuthClient()` creates a **new** `OAuth2Client` on every call. `getGmailClient()` (line 92) and `getCalendarClient()` (line 95) each call `getAuthClient()`, creating separate clients. Each client registers its own `tokens` event handler (line 76) that writes to the same file (line 85).
+`getAuthClient()` creates a new `OAuth2Client` per call. Each client's token refresh handler calls `saveTokens()` which reads the current v2 multi-account file, merges the updated tokens for the specific account alias, and writes back. This is a read-modify-write cycle that can still race if multiple clients refresh simultaneously, though the multi-account format isolates accounts from each other.
 
-When multiple clients refresh tokens simultaneously (common when access token expires during concurrent requests), multiple handlers fire and write to the same `tokens.json` file. Each handler's closure captures `tokens` from creation time (line 61), so later writes can overwrite newer values with stale data.
+**Triggers:** Concurrent API calls within the same account when access token is expired.
+**Impact:** Last-write-wins on the same account's tokens. Cross-account data is safe due to per-alias storage.
+**Likelihood:** Medium. Reduced from original because most MCP calls are sequential.
 
-**Triggers:** Concurrent Gmail + Calendar API calls when access token is expired (every ~1 hour).
-**Impact:** Token file corruption (interleaved writes), lost refresh tokens (stale closure overwrites), cascading into BUG-004 on next startup.
-**Likelihood:** High. Normal operation creates multiple clients; token expiry is routine.
-
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -118,7 +103,7 @@ Lists drafts (1 API call), then fetches each draft individually in a sequential 
 **Impact:** Extremely slow responses, potential rate limiting.
 **Likelihood:** Certain — happens on every invocation.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -143,7 +128,7 @@ The captured URL (`$2`) is inserted into the `href` attribute without escaping d
 **Impact:** Attribute injection in HTML email. Gmail's CSP may mitigate execution, but the HTML is still malformed.
 **Likelihood:** Medium. Requires crafted input, but the function processes user-provided body text.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -163,7 +148,7 @@ RFC 2822 headers must be ASCII-only. Non-ASCII characters (accented letters, CJK
 **Impact:** Malformed headers, potential rejection or garbled display.
 **Likelihood:** High for international users.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -182,7 +167,7 @@ If `emailAddress` is null/undefined, the From header becomes `From: me`, which i
 **Impact:** Invalid From header or crash.
 **Likelihood:** Low-medium. The API is usually reliable, but network issues happen.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -203,35 +188,21 @@ Example: Event is 2pm-3pm. Update `start` to 4pm. Result: event from 4pm-3pm.
 **Impact:** Invalid event data on user's calendar.
 **Likelihood:** Medium-high. Common in rescheduling workflows.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
 ### BUG-011: Partial env vars give unhelpful error
 **File:** `src/auth.ts`
-**Lines:** 38-52
+**Function:** `loadAccountStore()`
 
-```typescript
-const clientId = process.env.GOOGLE_CLIENT_ID;
-const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
-
-if (clientId && clientSecret && refreshToken) {
-  return { ... };
-}
-
-throw new Error(
-  `No credentials found. Run 'npm run setup' first, or set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN environment variables.`
-);
-```
-
-If 1 or 2 of 3 env vars are set, the error message says "No credentials found" without indicating which specific variables are missing vs. present.
+When no token file exists and env vars are used as fallback, the error now lists specifically which variables are missing (e.g., "Missing environment variables: GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN").
 
 **Triggers:** Setting only some env vars (e.g., forgot `GOOGLE_REFRESH_TOKEN`).
-**Impact:** Frustrating debugging experience — user doesn't know which var is missing.
+**Impact:** Previously: generic "No credentials found". Now: lists missing vars by name.
 **Likelihood:** Medium. Common during initial setup.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -252,7 +223,7 @@ Uses `=` instead of `+=`. If a multipart message has multiple `text/plain` parts
 **Impact:** Lost email content — only last text part shown.
 **Likelihood:** Medium. Uncommon but does occur with forwarded or automated messages.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -270,7 +241,7 @@ Uses `=` instead of `+=`. If a multipart message has multiple `text/plain` parts
 **Impact:** Script content leaks into plaintext. Undecoded entities show as raw codes.
 **Likelihood:** High for entity issues (em dashes, curly quotes are extremely common in emails).
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -290,7 +261,7 @@ If `internalDate` is non-numeric: `parseInt('abc', 10)` → `NaN` → `new Date(
 **Impact:** Runtime crash — entire thread listing fails.
 **Likelihood:** Low but catastrophic when it occurs.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -313,7 +284,7 @@ No validation. `"not-a-date"`, `"2024-13-99"`, `"tomorrow"` all pass through as 
 **Impact:** Unhelpful API error instead of early validation message.
 **Likelihood:** High. Users frequently provide informal date strings.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -331,7 +302,7 @@ The `||` operator treats empty string `""` as falsy, falling back to `'user'`. S
 **Impact:** Empty string silently replaced with `'user'`.
 **Likelihood:** Low. Gmail API typically returns `"system"` or `"user"`.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -350,7 +321,7 @@ JavaScript's `substring()` operates on UTF-16 code units. Surrogate pairs (emoji
 **Impact:** Corrupted character at truncation point.
 **Likelihood:** Medium-high. Emoji in emails are extremely common.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -368,7 +339,7 @@ Matches any line starting with "On " and ending with "wrote:". False positives i
 **Impact:** Silently strips real email content.
 **Likelihood:** Medium. Academic and professional emails discussing writing/authorship are vulnerable.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -393,7 +364,7 @@ All three items get stripped.
 **Impact:** Silently removes legitimate email content.
 **Likelihood:** Medium. Developer emails (markdown, Python) and short follow-up lists are affected.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -413,7 +384,7 @@ Checks only `part.filename` existence. Inline images (embedded logos, signature 
 **Impact:** Inline images listed as downloadable attachments, cluttering the attachment list.
 **Likelihood:** Very high. Most formatted emails have inline images.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -441,7 +412,7 @@ Gets split into two separate blocks: `["1. First item"]` and `["2. Second item"]
 **Impact:** Broken list formatting in HTML email.
 **Likelihood:** High. Users commonly add spacing between list items.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -461,7 +432,7 @@ No try-catch. Malformed base64 input either silently produces garbage bytes or t
 **Impact:** Silent data corruption or runtime crash.
 **Likelihood:** Low but unrecoverable when it occurs.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -482,7 +453,7 @@ Logic: keep if in KEEP_LABELS set OR if it doesn't start with `CATEGORY_`. This 
 **Impact:** Noisy label lists with irrelevant system labels.
 **Likelihood:** High for any email in spam/trash.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -494,7 +465,7 @@ Logic: keep if in KEEP_LABELS set OR if it doesn't start with `CATEGORY_`. This 
 
 Escapes `&`, `<`, `>` but not `"` (`&quot;`) or `'` (`&#39;`). Currently safe because escaped text goes into element content, not attributes. But a latent vulnerability if code is extended to use escaped text in attribute contexts.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ### BUG-025: Missing Date header in RFC 2822 output
 **File:** `src/gmail/drafts.ts`
@@ -502,15 +473,15 @@ Escapes `&`, `<`, `>` but not `"` (`&quot;`) or `'` (`&#39;`). Currently safe be
 
 RFC 2822 Section 3.6 requires a `Date:` header. Gmail likely adds it on send, but the draft is technically non-compliant.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ### BUG-026: HOME/USERPROFILE not set falls back to literal '~'
 **File:** `src/auth.ts`
-**Lines:** 6-10
+**Lines:** 6-10 (`TOKEN_DIR` construction)
 
-In containerized environments where neither `HOME` nor `USERPROFILE` is set, `path.join('~', '.config', ...)` creates a literal `~` directory in the working directory instead of the home directory.
+In containerized environments where neither `HOME` nor `USERPROFILE` is set, `path.join('~', '.config', ...)` creates a literal `~` directory in the working directory instead of the home directory. Token file (`tokens.json`) uses v2 multi-account format at this path.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ### BUG-027: macOS-only `open` command in setup
 **File:** `scripts/setup-oauth.ts`
@@ -518,14 +489,14 @@ In containerized environments where neither `HOME` nor `USERPROFILE` is set, `pa
 
 Uses `exec('open "${authUrl}"')` which only works on macOS. Fails silently on Windows (`start`) and Linux (`xdg-open`). Script still prints the URL, so user can copy-paste.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ### BUG-028: Non-null assertions on API response IDs
 **File:** `src/gmail/threads.ts` (line 239: `t.id!`), `src/gmail/drafts.ts` (line 303: `draft.id!`)
 
 TypeScript non-null assertions assume the API always returns `id` fields. If it doesn't (API bug, schema change), `undefined` propagates and causes crashes downstream.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ### BUG-029: formatEvent() attendee email could be undefined
 **File:** `src/calendar/events.ts`
@@ -533,7 +504,7 @@ TypeScript non-null assertions assume the API always returns `id` fields. If it 
 
 `a.email` in the attendee mapping could be `undefined` per the Calendar API schema. Returns `{ email: undefined }` instead of filtering or providing a default.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ### BUG-030: No email validation on to/cc/bcc
 **File:** `src/index.ts`
@@ -541,7 +512,7 @@ TypeScript non-null assertions assume the API always returns `id` fields. If it 
 
 Zod schemas accept any string for email fields. Invalid emails pass through to the Gmail API, which rejects them with cryptic errors instead of early validation.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ### BUG-031: handleListLabels() no pagination
 **File:** `src/gmail/labels.ts`
@@ -549,7 +520,7 @@ Zod schemas accept any string for email fields. Invalid emails pass through to t
 
 Only returns first page of labels. Users with extensive label systems (rare) won't see all labels.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ### BUG-032: Setup script timeout race condition
 **File:** `scripts/setup-oauth.ts`
@@ -557,7 +528,7 @@ Only returns first page of labels. Users with extensive label systems (rare) won
 
 If OAuth succeeds just before the 2-minute timeout fires, the server is already closed but the timeout still rejects, potentially causing an unhandled promise rejection.
 
-**Status: FIXED**
+**Status:** FIXED
 
 ---
 
@@ -567,7 +538,7 @@ These modules/functions have **zero test coverage**:
 
 | Module | Untested Functions |
 |--------|--------------------|
-| `src/auth.ts` | `loadTokens()`, `saveTokens()`, `getAuthClient()`, `getGmailClient()`, `getCalendarClient()` — entire module |
+| `src/auth.ts` | Now tested (24 tests): `loadAccountStore()`, `loadTokens()`, `saveTokens()`, `getAuthClient()`, `getGmailClient()`, `getCalendarClient()`, `listAccounts()` |
 | `src/gmail/drafts.ts` | `plainTextToHtml()`, `escapeHtml()`, `linkify()`, `isNumberedListBlock()`, `isBulletListBlock()`, `handleUpdateDraft()`, `handleListDrafts()`, `handleDeleteDraft()` |
 | `src/index.ts` | All tool registrations, Zod schema validation, MCP server setup |
 
