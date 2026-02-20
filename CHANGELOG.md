@@ -2,6 +2,38 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased] - 2026-02-20
+
+### Calendar Validation
+- `parseDateTime()` now validates date values — rejects invalid dates (e.g., "2024-13-99"), empty strings, and non-date strings (e.g., "tomorrow") with clear error messages
+- `calendar_list_events`: `max_results` now uses `??` instead of `||`, so explicit `0` is respected
+- `calendar_list_events`: validates `time_min <= time_max`, throws if inverted
+- `calendar_update_event`: rejects empty updates (at least one field required)
+- `formatEvent()`: safe attendee mapping with optional chaining (`a?.email`)
+
+### Draft Resilience
+- `handleCreateDraft` and `handleUpdateDraft`: threading header resolution (`resolveThreadingHeaders`) now wrapped in try-catch — drafts referencing deleted threads no longer crash
+- `buildRawEmail()`: `In-Reply-To` and `References` headers now sanitized via `sanitizeHeader()` to prevent CRLF injection
+
+### Auth
+- Legacy token migration now uses atomic write (tmp file + rename) to prevent corruption
+
+### Refactoring
+- `drafts.ts`: imports shared `getHeader` from `threads.ts` instead of defining local duplicates (RF-002)
+- `threads.ts`: `KEEP_LABELS` Set hoisted to module scope (RF-008)
+- `setup-oauth.ts`: imports `TOKEN_DIR`, `TOKEN_PATH`, `SCOPES` from `auth.ts` instead of redefining (RF-004)
+
+### Documentation
+- Consolidated bug docs: deleted 7 stale files, merged `INTEGRATION_BUGS.md` into `BUGS.md`
+- Updated `BUGS.md`: added BUG-066, marked BUG-039 as FIXED
+- Updated `CALENDAR_BUGS.md`: marked BUG-054/055/056/057/061/063 as FIXED
+
+## [Unreleased] - 2026-02-17
+
+### Specs
+- **New `specs/` directory:** Created directory for planned feature specifications.
+- **Email watcher daemon (`specs/email-watcher.md`):** First spec added — design document for a background daemon that watches for new emails.
+
 ## [Unreleased] - 2026-02-16
 
 ### Multi-Account Support

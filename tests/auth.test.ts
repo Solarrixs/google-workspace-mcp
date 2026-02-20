@@ -13,6 +13,7 @@ const { mockFs, mockOAuth2ClientInstance, mockGoogleAuth, mockGoogleGmail, mockG
       writeFileSync: vi.fn(),
       existsSync: vi.fn(),
       mkdirSync: vi.fn(),
+      renameSync: vi.fn(),
     },
     mockOAuth2ClientInstance,
     mockGoogleAuth: {
@@ -58,8 +59,8 @@ describe('BUG-004: Token file corruption crashes server on startup', () => {
     mockFs.existsSync.mockReturnValue(true);
     mockFs.readFileSync.mockReturnValue('{ invalid json }');
 
-    expect(() => getAuthClient()).toThrow(/Failed to parse/);
-    expect(() => getAuthClient()).toThrow(/tokens file/);
+    expect(() => getAuthClient()).toThrow(/corrupted/);
+    expect(() => getAuthClient()).toThrow(/DO NOT delete/);
   });
 
   it('throws helpful error when tokens.json read fails', () => {
@@ -68,7 +69,7 @@ describe('BUG-004: Token file corruption crashes server on startup', () => {
       throw new Error('EACCES: permission denied');
     });
 
-    expect(() => getAuthClient()).toThrow(/Failed to parse/);
+    expect(() => getAuthClient()).toThrow(/corrupted/);
   });
 });
 
@@ -346,12 +347,15 @@ describe('Token refresh event handler', () => {
     if (handler) {
       handler({ access_token: 'new-token', expiry_date: 9999999999 });
 
-      // Find the saveTokens write call (last writeFileSync call)
-      const lastCallIdx = mockFs.writeFileSync.mock.calls.length - 1;
-      const written = JSON.parse(mockFs.writeFileSync.mock.calls[lastCallIdx][1]);
+      // saveTokens writes to .tmp first, then renames. Find the first writeFileSync call (to .tmp)
+      const tmpWrite = mockFs.writeFileSync.mock.calls.find((c: any[]) => String(c[0]).endsWith('.tmp'));
+      expect(tmpWrite).toBeDefined();
+      const written = JSON.parse(tmpWrite![1]);
       expect(written.version).toBe(2);
       expect(written.accounts.work.access_token).toBe('new-token');
       expect(written.accounts.work.refresh_token).toBe('test-refresh'); // preserved
+      // Verify atomic rename was called
+      expect(mockFs.renameSync).toHaveBeenCalled();
     }
   });
 
@@ -367,8 +371,9 @@ describe('Token refresh event handler', () => {
         refresh_token: 'new-refresh',
       });
 
-      const lastCallIdx = mockFs.writeFileSync.mock.calls.length - 1;
-      const written = JSON.parse(mockFs.writeFileSync.mock.calls[lastCallIdx][1]);
+      const tmpWrite = mockFs.writeFileSync.mock.calls.find((c: any[]) => String(c[0]).endsWith('.tmp'));
+      expect(tmpWrite).toBeDefined();
+      const written = JSON.parse(tmpWrite![1]);
       expect(written.accounts.work.refresh_token).toBe('new-refresh');
     }
   });
@@ -392,8 +397,9 @@ describe('Token refresh event handler', () => {
     if (handler) {
       handler({ access_token: 'work-new-token', expiry_date: 9999999999 });
 
-      const lastCallIdx = mockFs.writeFileSync.mock.calls.length - 1;
-      const written = JSON.parse(mockFs.writeFileSync.mock.calls[lastCallIdx][1]);
+      const tmpWrite = mockFs.writeFileSync.mock.calls.find((c: any[]) => String(c[0]).endsWith('.tmp'));
+      expect(tmpWrite).toBeDefined();
+      const written = JSON.parse(tmpWrite![1]);
       expect(written.accounts.work.access_token).toBe('work-new-token');
       // Personal account should be untouched
       expect(written.accounts.personal.access_token).toBe('personal-old');

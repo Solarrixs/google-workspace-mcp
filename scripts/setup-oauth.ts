@@ -1,9 +1,10 @@
 import { google } from 'googleapis';
 import * as http from 'http';
 import * as fs from 'fs';
-import * as path from 'path';
 import * as url from 'url';
 import * as readline from 'readline';
+import { randomBytes } from 'crypto';
+import { TOKEN_DIR, TOKEN_PATH, SCOPES } from '../src/auth.js';
 
 
 function sanitizeError(error: any): string {
@@ -17,20 +18,6 @@ function sanitizeError(error: any): string {
   }
   return 'An error occurred';
 }
-
-const TOKEN_DIR = path.join(
-  process.env.HOME || process.env.USERPROFILE || '~',
-  '.config',
-  'google-workspace-mcp'
-);
-const TOKEN_PATH = path.join(TOKEN_DIR, 'tokens.json');
-
-const SCOPES = [
-  'https://www.googleapis.com/auth/gmail.readonly',
-  'https://www.googleapis.com/auth/gmail.compose',
-  'https://www.googleapis.com/auth/gmail.labels',
-  'https://www.googleapis.com/auth/calendar',
-];
 
 const REDIRECT_URI = 'http://localhost:3000/oauth2callback';
 
@@ -126,10 +113,14 @@ async function main() {
 
   const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, REDIRECT_URI);
 
+  // Generate random state parameter for CSRF protection
+  const state = randomBytes(32).toString('hex');
+
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: SCOPES,
     prompt: 'consent', // Force consent to get refresh token
+    state, // Add state parameter for CSRF protection
   });
 
   console.log('\nOpening browser for authorization...');
@@ -156,10 +147,21 @@ async function main() {
       if (parsedUrl.pathname === '/oauth2callback') {
         const authCode = parsedUrl.query.code as string;
         const error = parsedUrl.query.error as string;
+        const returnedState = parsedUrl.query.state as string;
+
+        // Validate state parameter to prevent CSRF attacks
+        if (!returnedState || returnedState !== state) {
+          res.writeHead(400, { 'Content-Type': 'text/html' });
+          res.end('<h1>Authorization failed</h1><p>Invalid state parameter - possible CSRF attack detected.</p>');
+          server.close();
+          reject(new Error('Invalid state parameter - possible CSRF attack'));
+          return;
+        }
 
         if (error) {
           res.writeHead(400, { 'Content-Type': 'text/html' });
-          res.end(`<h1>Authorization failed</h1><p>${error}</p>`);
+          const safeError = error.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          res.end(`<h1>Authorization failed</h1><p>${safeError}</p>`);
           reject(new Error(`Authorization failed: ${error}`));
         } else if (authCode) {
           res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -227,7 +229,7 @@ async function main() {
       `Gmail access OK — found ${res.data.resultSizeEstimate || 0} threads`
     );
   } catch (err: any) {
-    console.error(`Gmail verification failed: ${err.message}`);
+    console.error(`Gmail verification failed: ${sanitizeError(err)}`);
   }
 
   try {
@@ -241,7 +243,7 @@ async function main() {
       `Calendar access OK — found ${calRes.data.items?.length || 0} upcoming events`
     );
   } catch (err: any) {
-    console.error(`Calendar verification failed: ${err.message}`);
+    console.error(`Calendar verification failed: ${sanitizeError(err)}`);
   }
 
   // Save in multi-account format
@@ -283,6 +285,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Setup failed:', err.message);
+  console.error('Setup failed:', sanitizeError(err));
   process.exit(1);
 });

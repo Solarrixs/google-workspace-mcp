@@ -45,16 +45,27 @@ function formatEvent(event: calendar_v3.Schema$Event) {
     summary: event.summary || '',
     start: event.start?.dateTime || event.start?.date || '',
     end: event.end?.dateTime || event.end?.date || '',
-    attendees: (event.attendees || []).map((a) => a.email).filter((email): email is string => !!email),
+    attendees: (event.attendees || []).map((a) => a?.email).filter((email): email is string => !!email),
     location: event.location || '',
     description: desc,
   });
 }
 
 function parseDateTime(iso: string): calendar_v3.Schema$EventDateTime {
+  if (!iso) {
+    throw new Error('Invalid date input: value cannot be empty');
+  }
   // If it's a date-only string (YYYY-MM-DD), use date field
   if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const d = new Date(iso + 'T00:00:00');
+    if (isNaN(d.getTime())) {
+      throw new Error(`Invalid date: ${iso}`);
+    }
     return { date: iso };
+  }
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) {
+    throw new Error(`Invalid datetime: ${iso}`);
   }
   return { dateTime: iso };
 }
@@ -66,11 +77,17 @@ export async function handleListEvents(
   const now = new Date();
   const weekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
+  if (params.time_min && params.time_max) {
+    if (new Date(params.time_min) > new Date(params.time_max)) {
+      throw new Error('time_min must be before time_max');
+    }
+  }
+
   const res = await calendar.events.list({
     calendarId: params.calendar_id || 'primary',
     timeMin: params.time_min || now.toISOString(),
     timeMax: params.time_max || weekFromNow.toISOString(),
-    maxResults: params.max_results || 25,
+    maxResults: params.max_results ?? 25,
     singleEvents: true,
     orderBy: 'startTime',
   });
@@ -111,6 +128,10 @@ export async function handleUpdateEvent(
   if (params.location !== undefined) update.location = params.location;
   if (params.attendees !== undefined)
     update.attendees = params.attendees.map((email) => ({ email }));
+
+  if (Object.keys(update).length === 0) {
+    throw new Error('At least one field must be provided for update');
+  }
 
   const res = await calendar.events.patch({
     calendarId: params.calendar_id || 'primary',

@@ -96,9 +96,9 @@ All tools accept an optional `account` parameter to select which Google account 
 
 | Tool | Description |
 |------|-------------|
-| `calendar_list_events` | List events in a time range (defaults: now to 7 days). Supports custom `calendar_id` |
+| `calendar_list_events` | List events in a time range (defaults: now to 7 days). Validates `time_min <= time_max`. Supports custom `calendar_id` |
 | `calendar_create_event` | Create an event with summary, start/end, attendees, location, description |
-| `calendar_update_event` | Update an event — only changed fields are sent (PATCH) |
+| `calendar_update_event` | Update an event — only changed fields are sent (PATCH). At least one field must be provided |
 | `calendar_delete_event` | Delete an event |
 
 ## OAuth Scopes
@@ -135,6 +135,7 @@ src/
 tests/                    # Vitest — mock-based, no real API calls
 scripts/
 └── setup-oauth.ts        # Interactive OAuth setup wizard
+specs/                    # Planned feature specs (see specs/email-watcher.md)
 ```
 
 See [CLAUDE.md](CLAUDE.md) for detailed architecture documentation and [INDEX.md](INDEX.md) for a file-by-file reference.

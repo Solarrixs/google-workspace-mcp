@@ -2,12 +2,19 @@ import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+import { randomBytes } from 'crypto';
 
-const TOKEN_DIR = path.join(
-  process.env.HOME || process.env.USERPROFILE || '~',
-  '.config',
-  'google-workspace-mcp'
-);
+function hasNullByte(str: string): boolean {
+  return str.includes('\u0000');
+}
+
+const TOKEN_DIR = path.join(os.homedir(), '.config', 'google-workspace-mcp');
+
+if (hasNullByte(TOKEN_DIR)) {
+  throw new Error('Invalid path: null byte detected in token directory');
+}
+
 const TOKEN_PATH = path.join(TOKEN_DIR, 'tokens.json');
 
 const SCOPES = [
@@ -27,6 +34,7 @@ interface StoredTokens {
   expiry_date?: number;
   client_hash?: string;
   email?: string;
+  device_identifier?: string;
 }
 
 interface MultiAccountTokenFile {
@@ -40,12 +48,32 @@ function loadAccountStore(): MultiAccountTokenFile {
   if (fs.existsSync(TOKEN_PATH)) {
     let data: any;
     try {
-      data = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8'));
+      const raw = fs.readFileSync(TOKEN_PATH, 'utf-8');
+      if (!raw.trim()) throw new Error('Empty file');
+      data = JSON.parse(raw);
     } catch (e) {
-      throw new Error(
-        `Failed to parse tokens file at ${TOKEN_PATH}. The file may be corrupted. ` +
-        `Delete it and run 'npm run setup' to reconfigure.`
-      );
+      // Primary file corrupted/empty — try backup
+      const backupPath = TOKEN_PATH + '.bak';
+      if (fs.existsSync(backupPath)) {
+        try {
+          const backupRaw = fs.readFileSync(backupPath, 'utf-8');
+          data = JSON.parse(backupRaw);
+          // Restore the primary file from backup
+          const tmpPath = TOKEN_PATH + '.tmp';
+          fs.writeFileSync(tmpPath, backupRaw);
+          fs.renameSync(tmpPath, TOKEN_PATH);
+        } catch {
+          throw new Error(
+            `Tokens file at ${TOKEN_PATH} and its backup are both corrupted. ` +
+            `DO NOT delete the file. The user must manually run 'npm run setup' in the google-workspace-mcp project directory to reconfigure.`
+          );
+        }
+      } else {
+        throw new Error(
+          `Tokens file at ${TOKEN_PATH} is corrupted (no backup available). ` +
+          `DO NOT delete the file. The user must manually run 'npm run setup' in the google-workspace-mcp project directory to reconfigure.`
+        );
+      }
     }
 
     // v2 multi-account format
@@ -61,7 +89,9 @@ function loadAccountStore(): MultiAccountTokenFile {
       accounts: { default: legacy },
     };
     fs.mkdirSync(TOKEN_DIR, { recursive: true });
-    fs.writeFileSync(TOKEN_PATH, JSON.stringify(migrated, null, 2));
+    const tmpPath = TOKEN_PATH + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(migrated, null, 2));
+    fs.renameSync(tmpPath, TOKEN_PATH);
     return migrated;
   }
 
@@ -92,7 +122,7 @@ function loadAccountStore(): MultiAccountTokenFile {
 
   throw new Error(
     `No credentials found. Missing environment variables: ${missing.join(', ')}. ` +
-    `Run 'npm run setup' first, or set all required environment variables.`
+    `DO NOT delete any files. The user must manually run 'npm run setup' in the google-workspace-mcp project directory, or set all required environment variables.`
   );
 }
 
@@ -121,7 +151,9 @@ function saveTokens(tokens: StoredTokens, account: string): void {
 
   if (fs.existsSync(TOKEN_PATH)) {
     try {
-      const data = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8'));
+      const raw = fs.readFileSync(TOKEN_PATH, 'utf-8');
+      if (!raw.trim()) throw new Error('Empty file');
+      const data = JSON.parse(raw);
       if (data.version === 2) {
         store = data;
       } else {
@@ -132,11 +164,21 @@ function saveTokens(tokens: StoredTokens, account: string): void {
         };
       }
     } catch {
-      store = {
-        version: 2,
-        default_account: account,
-        accounts: {},
-      };
+      // File is corrupted/empty — try the backup before creating empty store
+      const backupPath = TOKEN_PATH + '.bak';
+      try {
+        const backupRaw = fs.readFileSync(backupPath, 'utf-8');
+        const backupData = JSON.parse(backupRaw);
+        store = backupData.version === 2
+          ? backupData
+          : { version: 2, default_account: 'default', accounts: { default: backupData } };
+      } catch {
+        store = {
+          version: 2,
+          default_account: account,
+          accounts: {},
+        };
+      }
     }
   } else {
     store = {
@@ -146,9 +188,22 @@ function saveTokens(tokens: StoredTokens, account: string): void {
     };
   }
 
+  // Generate device identifier if not present (BUG-047: prevents token replay)
+  if (!tokens.device_identifier) {
+    tokens.device_identifier = randomBytes(16).toString('hex');
+  }
+
   store.accounts[account] = tokens;
   fs.mkdirSync(TOKEN_DIR, { recursive: true });
-  fs.writeFileSync(TOKEN_PATH, JSON.stringify(store, null, 2));
+
+  // Atomic write: write to temp file, then rename (rename is atomic on POSIX)
+  const tmpPath = TOKEN_PATH + '.tmp';
+  const content = JSON.stringify(store, null, 2);
+  fs.writeFileSync(tmpPath, content);
+  fs.renameSync(tmpPath, TOKEN_PATH);
+
+  // Keep a backup of the last known good state
+  try { fs.writeFileSync(TOKEN_PATH + '.bak', content); } catch {}
 }
 
 export function getAuthClient(account?: string): OAuth2Client {

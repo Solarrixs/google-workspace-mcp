@@ -39,7 +39,10 @@ Every tool accepts an optional `account` parameter (alias like "work", "personal
 ```
 src/utils.ts (compact)
   ↑ imported by threads.ts, drafts.ts, events.ts
+src/gmail/threads.ts (getHeader)
+  ↑ imported by drafts.ts
 src/auth.ts (standalone — OAuth2 client factory)
+  ↑ imported by setup-oauth.ts (TOKEN_DIR, TOKEN_PATH, SCOPES)
 src/gmail/labels.ts (standalone)
 ```
 
@@ -59,7 +62,7 @@ Supports multiple Google accounts identified by short aliases (e.g., "work", "pe
 }
 ```
 
-**Legacy migration**: Old flat `tokens.json` (no `version` field) is auto-migrated to v2 on first read, wrapped as account `"default"`.
+**Legacy migration**: Old flat `tokens.json` (no `version` field) is auto-migrated to v2 on first read, wrapped as account `"default"`. Legacy migration uses atomic write (tmp file + rename) to prevent corruption during the upgrade.
 
 **Credential sources** (file takes precedence):
 1. **Token file** (v2 multi-account or legacy auto-migrated)
@@ -84,11 +87,11 @@ Other: snippets truncated at 150 chars. Labels filtered to keep only `INBOX`, `U
 
 `buildRawEmail()` constructs RFC 2822 messages with CRLF line endings. Body goes through `plainTextToHtml()` which: escapes HTML entities → splits on double newlines into blocks → detects numbered lists (`/^\d+[.)]\s/`) as `<ol>`, bullet lists (`/^[-*]\s/`) as `<ul>`, or wraps as `<p>` → converts `[text](url)` markdown links to `<a>` tags.
 
-**Threading auto-resolution**: when `thread_id` is provided without `in_reply_to`, automatically fetches the thread's last message `Message-ID` header and builds a `References` chain. Same logic in both `handleCreateDraft` and `handleUpdateDraft`.
+**Threading auto-resolution**: when `thread_id` is provided without `in_reply_to`, automatically fetches the thread's last message `Message-ID` header and builds a `References` chain. Same logic in both `handleCreateDraft` and `handleUpdateDraft`. If the referenced thread has been deleted, threading resolution fails gracefully (try-catch) — the draft is created/updated without threading headers rather than crashing.
 
 ### Calendar (`src/calendar/events.ts`)
 
-`parseDateTime()` distinguishes all-day events (`/^\d{4}-\d{2}-\d{2}$/` → `{ date }`) from timed events (`{ dateTime }`). Updates use `calendar.events.patch()` sending only changed fields. Defaults to `'primary'` calendar.
+`parseDateTime()` distinguishes all-day events (`/^\d{4}-\d{2}-\d{2}$/` → `{ date }`) from timed events (`{ dateTime }`), and validates both via `new Date()` — rejects invalid dates, empty strings, and garbage input with descriptive errors. `handleListEvents` validates `time_min <= time_max`. `handleUpdateEvent` requires at least one field and uses `calendar.events.patch()` sending only changed fields. Defaults to `'primary'` calendar.
 
 ### Utilities (`src/utils.ts`)
 
@@ -120,10 +123,11 @@ Key patterns for writing new tests:
 - **ES Modules** — `"type": "module"` in package.json; all imports use `.js` extensions
 - **Strict TypeScript** — `strict: true`, target ES2022, Node16 module resolution
 - **Token storage** — `~/.config/google-workspace-mcp/tokens.json`, not in project directory
-- **macOS-specific** — setup script uses `open` command to launch browser
+- **Cross-platform** — setup script detects OS and uses `open` (macOS), `start` (Windows), or `xdg-open` (Linux) to launch browser
 
 ## Related Docs
 
 - [INDEX.md](INDEX.md) — File-by-file reference with exports for each module
 - [CHANGELOG.md](CHANGELOG.md) — Development history and feature log
-- [BUGS.md](BUGS.md) — 32 known bugs with exact locations, root causes, and severity ratings
+- [bugs/BUGS.md](bugs/BUGS.md) — 13 remaining bugs (1 critical, 3 high, 3 medium, 6 low) + test coverage gaps
+- [specs/email-watcher.md](specs/email-watcher.md) — Planned feature: Gmail watcher daemon that polls for new emails and spawns Claude CLI to triage and draft replies

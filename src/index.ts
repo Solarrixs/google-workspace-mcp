@@ -15,16 +15,19 @@ import {
   handleDeleteEvent,
 } from './calendar/events.js';
 
-function validateStringSize(value: string, maxSize: number, name: string): string {
+export function validateStringSize(value: string, maxSize: number, name: string): string {
   if (value.length > maxSize) {
     throw new Error(`${name} exceeds maximum size of ${maxSize} bytes`);
   }
   return value;
 }
 
-function stripControlChars(value: string): string {
-  return value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+export function stripControlChars(value: string): string {
+  return value.replace(/[\x00-\x08\x0B-\x1F\x7F]/g, '');
 }
+
+const gmailId = z.string().min(1).max(256).regex(/^[a-zA-Z0-9_-]+$/, 'Invalid ID format');
+const calendarId = z.string().min(1).max(256);
 
 const accountParam = z.string().optional().describe(
   'Account alias (e.g., "work", "personal"). Defaults to primary account. Use list_accounts to see available accounts.'
@@ -88,7 +91,7 @@ server.tool(
   'gmail_get_thread',
   'Read the full content of a specific email thread — all messages in chronological order with bodies.',
   {
-    thread_id: z.string().describe('Gmail thread ID'),
+    thread_id: gmailId.describe('Gmail thread ID'),
     format: z.enum(['full', 'minimal']).optional().describe('full (default) includes message bodies, minimal does not'),
     account: accountParam,
   },
@@ -113,13 +116,13 @@ server.tool(
   'gmail_create_draft',
   'Create a draft email. Supports threaded replies (draft appears as reply in existing conversation). Draft-only — never sends.',
   {
-    to: z.string().describe('Recipient email(s), comma-separated'),
+    to: z.string().transform(v => v.replace(/[\r\n]/g, '')).describe('Recipient email(s), comma-separated'),
     subject: z.string().transform(v => stripControlChars(validateStringSize(v, 1000, 'subject'))).describe('Email subject line'),
     body: z.string().transform(v => stripControlChars(validateStringSize(v, 10485760, 'body'))).describe('Email body (plain text)'),
-    thread_id: z.string().optional().describe('Thread ID for threaded reply'),
+    thread_id: gmailId.optional().describe('Thread ID for threaded reply'),
     in_reply_to: z.string().optional().describe('Message-ID of the message being replied to'),
-    cc: z.string().optional().describe('CC recipients'),
-    bcc: z.string().optional().describe('BCC recipients'),
+    cc: z.string().optional().transform(v => v ? v.replace(/[\r\n]/g, '') : v).describe('CC recipients'),
+    bcc: z.string().optional().transform(v => v ? v.replace(/[\r\n]/g, '') : v).describe('BCC recipients'),
     account: accountParam,
   },
   async (params) => {
@@ -143,14 +146,14 @@ server.tool(
   'gmail_update_draft',
   'Update an existing draft email. Only provide fields you want to change; others are preserved from the existing draft.',
   {
-    draft_id: z.string().describe('Draft ID to update (returned by gmail_create_draft)'),
-    to: z.string().optional().describe('New recipient email(s), comma-separated'),
+    draft_id: gmailId.describe('Draft ID to update (returned by gmail_create_draft)'),
+    to: z.string().optional().transform(v => v ? v.replace(/[\r\n]/g, '') : v).describe('New recipient email(s), comma-separated'),
     subject: z.string().optional().describe('New subject line'),
     body: z.string().optional().describe('New email body (plain text)'),
-    thread_id: z.string().optional().describe('Thread ID for threaded reply'),
+    thread_id: gmailId.optional().describe('Thread ID for threaded reply'),
     in_reply_to: z.string().optional().describe('Message-ID of the message being replied to'),
-    cc: z.string().optional().describe('New CC recipients'),
-    bcc: z.string().optional().describe('New BCC recipients'),
+    cc: z.string().optional().transform(v => v ? v.replace(/[\r\n]/g, '') : v).describe('New CC recipients'),
+    bcc: z.string().optional().transform(v => v ? v.replace(/[\r\n]/g, '') : v).describe('New BCC recipients'),
     account: accountParam,
   },
   async (params) => {
@@ -174,7 +177,7 @@ server.tool(
   'gmail_delete_draft',
   'Permanently delete a draft email.',
   {
-    draft_id: z.string().describe('Draft ID to delete (returned by gmail_create_draft)'),
+    draft_id: gmailId.describe('Draft ID to delete (returned by gmail_create_draft)'),
     account: accountParam,
   },
   async (params) => {
@@ -250,7 +253,7 @@ server.tool(
     time_min: z.string().optional().describe('ISO 8601 start time (default: now)'),
     time_max: z.string().optional().describe('ISO 8601 end time (default: 7 days from now)'),
     max_results: z.number().min(1).max(100).optional().describe('Max events (default: 25)'),
-    calendar_id: z.string().optional().describe('Calendar ID (default: primary)'),
+    calendar_id: calendarId.optional().describe('Calendar ID (default: primary)'),
     account: accountParam,
   },
   async (params) => {
@@ -280,7 +283,7 @@ server.tool(
     description: z.string().optional().describe('Event description'),
     attendees: z.array(z.string()).optional().describe('Attendee email addresses'),
     location: z.string().optional().describe('Event location'),
-    calendar_id: z.string().optional().describe('Calendar ID (default: primary)'),
+    calendar_id: calendarId.optional().describe('Calendar ID (default: primary)'),
     account: accountParam,
   },
   async (params) => {
@@ -304,14 +307,14 @@ server.tool(
   'calendar_update_event',
   'Update an existing calendar event.',
   {
-    event_id: z.string().describe('Event ID to update'),
+    event_id: z.string().min(1).max(256).describe('Event ID to update'),
     summary: z.string().optional().describe('New title'),
     start: z.string().optional().describe('New start time'),
     end: z.string().optional().describe('New end time'),
     description: z.string().optional().describe('New description'),
     attendees: z.array(z.string()).optional().describe('New attendee list'),
     location: z.string().optional().describe('New location'),
-    calendar_id: z.string().optional().describe('Calendar ID (default: primary)'),
+    calendar_id: calendarId.optional().describe('Calendar ID (default: primary)'),
     account: accountParam,
   },
   async (params) => {
@@ -335,8 +338,8 @@ server.tool(
   'calendar_delete_event',
   'Delete a calendar event.',
   {
-    event_id: z.string().describe('Event ID to delete'),
-    calendar_id: z.string().optional().describe('Calendar ID (default: primary)'),
+    event_id: z.string().min(1).max(256).describe('Event ID to delete'),
+    calendar_id: calendarId.optional().describe('Calendar ID (default: primary)'),
     account: accountParam,
   },
   async (params) => {

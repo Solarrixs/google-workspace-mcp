@@ -1,6 +1,8 @@
 import type { gmail_v1 } from 'googleapis';
 import { compact } from '../utils.js';
 
+const KEEP_LABELS = new Set(['INBOX', 'UNREAD', 'SENT', 'IMPORTANT', 'STARRED', 'DRAFT']);
+
 interface ListThreadsParams {
   query?: string;
   max_results?: number;
@@ -34,8 +36,10 @@ export function extractEmailAddresses(headerValue: string): string[] {
 
 export function stripHtmlTags(html: string): string {
   return html
-    .replace(/<[^>]*>/g, '')
-    .replace(/&amp;/g, '&')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')   // strip script content
+    .replace(/<style[\s\S]*?<\/style>/gi, '')      // strip style content
+    .replace(/<[^>]*>/g, '')                        // strip remaining tags
+    .replace(/&amp;/g, '&')                         // THEN decode entities
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
@@ -260,8 +264,6 @@ export async function handleListThreads(
         snippet = snippet.substring(0, 150) + '...';
       }
 
-      // Filter labels to actionable ones only
-      const KEEP_LABELS = new Set(['INBOX', 'UNREAD', 'SENT', 'IMPORTANT', 'STARRED', 'DRAFT']);
       const filteredLabels = labels.filter(
         (l) => KEEP_LABELS.has(l) || !l.startsWith('CATEGORY_')
       );

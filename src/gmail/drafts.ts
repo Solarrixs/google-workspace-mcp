@@ -1,5 +1,6 @@
 import type { gmail_v1 } from 'googleapis';
 import { compact } from '../utils.js';
+import { getHeader as getHeaderValue } from './threads.js';
 
 interface CreateDraftParams {
   to: string;
@@ -78,31 +79,67 @@ export function buildRawEmail(params: {
   inReplyTo?: string;
   references?: string;
 }): string {
+  const sanitizeHeader = (v: string) => v.replace(/[\r\n]/g, '');
+
   const htmlBody = `<div style="font-family:sans-serif;font-size:14px;color:#222">${plainTextToHtml(params.body)}</div>`;
 
   const lines: string[] = [
-    `From: ${params.from}`,
-    `To: ${params.to}`,
-    `Subject: ${params.subject}`,
+    `From: ${sanitizeHeader(params.from)}`,
+    `To: ${sanitizeHeader(params.to)}`,
+    `Subject: ${sanitizeHeader(params.subject)}`,
     'MIME-Version: 1.0',
     'Content-Type: text/html; charset=utf-8',
   ];
 
   if (params.cc) {
-    lines.push(`Cc: ${params.cc}`);
+    lines.push(`Cc: ${sanitizeHeader(params.cc)}`);
   }
   if (params.bcc) {
-    lines.push(`Bcc: ${params.bcc}`);
+    lines.push(`Bcc: ${sanitizeHeader(params.bcc)}`);
   }
   if (params.inReplyTo) {
-    lines.push(`In-Reply-To: ${params.inReplyTo}`);
-    lines.push(`References: ${params.references || params.inReplyTo}`);
+    lines.push(`In-Reply-To: ${sanitizeHeader(params.inReplyTo)}`);
+    lines.push(`References: ${sanitizeHeader(params.references || params.inReplyTo)}`);
   }
 
   // Empty line separates headers from body
   lines.push('', htmlBody);
 
   return Buffer.from(lines.join('\r\n')).toString('base64url');
+}
+
+async function resolveThreadingHeaders(
+  gmail: gmail_v1.Gmail,
+  threadId: string,
+  inReplyTo?: string
+): Promise<{ inReplyTo?: string; references?: string }> {
+  if (inReplyTo) return { inReplyTo, references: inReplyTo };
+
+  const threadRes = await gmail.users.threads.get({
+    userId: 'me',
+    id: threadId,
+    format: 'metadata',
+    metadataHeaders: ['Message-ID', 'References'],
+  });
+
+  const messages = threadRes.data.messages || [];
+  const lastMsg = messages[messages.length - 1];
+  if (!lastMsg?.payload?.headers) return {};
+
+  const msgIdHeader = lastMsg.payload.headers.find(
+    (h) => h.name?.toLowerCase() === 'message-id'
+  );
+  const resolvedInReplyTo = msgIdHeader?.value;
+  if (!resolvedInReplyTo) return {};
+
+  const refHeader = lastMsg.payload.headers.find(
+    (h) => h.name?.toLowerCase() === 'references'
+  );
+  const references = refHeader?.value
+    ? `${refHeader.value} ${resolvedInReplyTo}`
+    : resolvedInReplyTo;
+
+  return { inReplyTo: resolvedInReplyTo, references };
 }
 
 export async function handleCreateDraft(
@@ -113,37 +150,17 @@ export async function handleCreateDraft(
   const profile = await gmail.users.getProfile({ userId: 'me' });
   const fromEmail = profile.data.emailAddress || 'me';
 
-  // If replying to a thread, fetch the last message's Message-ID for threading
+  // Resolve threading headers (auto-fetches last message's Message-ID if needed)
   let inReplyTo = params.in_reply_to;
   let references = params.in_reply_to;
 
-  if (params.thread_id && !inReplyTo) {
-    // Auto-fetch the last message's Message-ID from the thread
-    const threadRes = await gmail.users.threads.get({
-      userId: 'me',
-      id: params.thread_id,
-      format: 'metadata',
-      metadataHeaders: ['Message-ID', 'References'],
-    });
-
-    const messages = threadRes.data.messages || [];
-    const lastMsg = messages[messages.length - 1];
-    if (lastMsg?.payload?.headers) {
-      const msgIdHeader = lastMsg.payload.headers.find(
-        (h) => h.name?.toLowerCase() === 'message-id'
-      );
-      if (msgIdHeader?.value) {
-        inReplyTo = msgIdHeader.value;
-      }
-      // Build references chain
-      const refHeader = lastMsg.payload.headers.find(
-        (h) => h.name?.toLowerCase() === 'references'
-      );
-      if (refHeader?.value && inReplyTo) {
-        references = `${refHeader.value} ${inReplyTo}`;
-      } else {
-        references = inReplyTo;
-      }
+  if (params.thread_id) {
+    try {
+      const threading = await resolveThreadingHeaders(gmail, params.thread_id, params.in_reply_to);
+      inReplyTo = threading.inReplyTo;
+      references = threading.references;
+    } catch {
+      // Thread may have been deleted — proceed without threading headers
     }
   }
 
@@ -199,18 +216,29 @@ export async function handleUpdateDraft(
   });
 
   const existingHeaders = existing.data.message?.payload?.headers || [];
-  const getHeader = (name: string) =>
-    existingHeaders.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+  const getHeader = (name: string) => getHeaderValue(existingHeaders, name);
 
-  // Decode existing body
+  // Decode existing body (our drafts use text/html, so handle both formats)
   let existingBody = '';
   const payload = existing.data.message?.payload;
   if (payload?.body?.data) {
-    existingBody = Buffer.from(payload.body.data, 'base64url').toString('utf-8');
+    const rawBody = Buffer.from(payload.body.data, 'base64url').toString('utf-8');
+    if (payload.mimeType === 'text/html') {
+      existingBody = rawBody.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+    } else {
+      existingBody = rawBody;
+    }
   } else if (payload?.parts) {
-    const textPart = payload.parts.find((p) => p.mimeType === 'text/plain');
-    if (textPart?.body?.data) {
-      existingBody = Buffer.from(textPart.body.data, 'base64url').toString('utf-8');
+    const textPart = payload.parts.find((p: any) => p.mimeType === 'text/plain');
+    const htmlPart = payload.parts.find((p: any) => p.mimeType === 'text/html');
+    const part = textPart || htmlPart;
+    if (part?.body?.data) {
+      const rawBody = Buffer.from(part.body.data, 'base64url').toString('utf-8');
+      if (part.mimeType === 'text/html') {
+        existingBody = rawBody.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+      } else {
+        existingBody = rawBody;
+      }
     }
   }
 
@@ -224,29 +252,12 @@ export async function handleUpdateDraft(
   let references = getHeader('References') || inReplyTo;
 
   if (threadId && !inReplyTo) {
-    const threadRes = await gmail.users.threads.get({
-      userId: 'me',
-      id: threadId,
-      format: 'metadata',
-      metadataHeaders: ['Message-ID', 'References'],
-    });
-    const messages = threadRes.data.messages || [];
-    const lastMsg = messages[messages.length - 1];
-    if (lastMsg?.payload?.headers) {
-      const msgIdHeader = lastMsg.payload.headers.find(
-        (h) => h.name?.toLowerCase() === 'message-id'
-      );
-      if (msgIdHeader?.value) {
-        inReplyTo = msgIdHeader.value;
-      }
-      const refHeader = lastMsg.payload.headers.find(
-        (h) => h.name?.toLowerCase() === 'references'
-      );
-      if (refHeader?.value && inReplyTo) {
-        references = `${refHeader.value} ${inReplyTo}`;
-      } else {
-        references = inReplyTo;
-      }
+    try {
+      const threading = await resolveThreadingHeaders(gmail, threadId);
+      inReplyTo = threading.inReplyTo || inReplyTo;
+      references = threading.references || references;
+    } catch {
+      // Thread may have been deleted — keep existing headers
     }
   }
 
@@ -294,29 +305,27 @@ export async function handleListDrafts(
   });
 
   const drafts = res.data.drafts || [];
-  const results = [];
 
-  for (const draft of drafts) {
-    const detail = await gmail.users.drafts.get({
-      userId: 'me',
-      id: draft.id!,
-      format: 'full',
-    });
+  const results = await Promise.all(
+    drafts.map(async (draft) => {
+      const detail = await gmail.users.drafts.get({
+        userId: 'me',
+        id: draft.id!,
+        format: 'full',
+      });
 
-    const headers = detail.data.message?.payload?.headers || [];
-    const getHeader = (name: string) =>
-      headers.find((h: { name?: string | null; value?: string | null }) =>
-        h.name?.toLowerCase() === name.toLowerCase()
-      )?.value || '';
+      const headers = detail.data.message?.payload?.headers || [];
+      const getHeader = (name: string) => getHeaderValue(headers, name);
 
-    results.push(compact({
-      draft_id: draft.id,
-      message_id: detail.data.message?.id,
-      thread_id: detail.data.message?.threadId,
-      subject: getHeader('Subject'),
-      to: getHeader('To'),
-    }));
-  }
+      return compact({
+        draft_id: draft.id,
+        message_id: detail.data.message?.id,
+        thread_id: detail.data.message?.threadId,
+        subject: getHeader('Subject'),
+        to: getHeader('To'),
+      });
+    })
+  );
 
   return { drafts: results, count: results.length };
 }
