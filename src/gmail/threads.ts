@@ -195,22 +195,29 @@ export function stripSignature(text: string): string {
 
 export function getAttachments(
   payload: gmail_v1.Schema$MessagePart | undefined
-): Array<{ filename: string; mime_type: string; size: number }> {
+): Array<{ filename: string; mime_type: string; size: number; attachment_id?: string }> {
   const attachments: Array<{
     filename: string;
     mime_type: string;
     size: number;
+    attachment_id?: string;
   }> = [];
 
   if (!payload?.parts) return attachments;
 
   for (const part of payload.parts) {
     if (part.filename && part.filename.length > 0) {
-      attachments.push({
-        filename: part.filename,
-        mime_type: part.mimeType || 'application/octet-stream',
-        size: part.body?.size || 0,
-      });
+      const disposition = getHeader(part.headers, 'Content-Disposition');
+      if (!disposition || !disposition.toLowerCase().startsWith('inline')) {
+        const att: { filename: string; mime_type: string; size: number; attachment_id?: string } = {
+          filename: part.filename,
+          mime_type: part.mimeType || 'application/octet-stream',
+          size: part.body?.size || 0,
+        };
+        // attachment_id is needed by gmail_download_attachment to fetch bytes
+        if (part.body?.attachmentId) att.attachment_id = part.body.attachmentId;
+        attachments.push(att);
+      }
     }
     // Check nested parts
     if (part.parts) {

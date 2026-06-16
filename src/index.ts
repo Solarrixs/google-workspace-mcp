@@ -8,6 +8,7 @@ import {
 } from './gmail/threads.js';
 import { handleCreateDraft, handleUpdateDraft, handleDeleteDraft, handleListDrafts } from './gmail/drafts.js';
 import { handleListLabels } from './gmail/labels.js';
+import { handleDownloadAttachment } from './gmail/attachments.js';
 import {
   handleListEvents,
   handleCreateEvent,
@@ -209,6 +210,33 @@ server.tool(
       const { account, ...handlerParams } = params;
       const gmail = getGmailClient(account);
       const result = await handleListDrafts(gmail, handlerParams);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error occurred' })
+        }]
+      };
+    }
+  }
+);
+
+server.tool(
+  'gmail_download_attachment',
+  'Download an email attachment to disk. Get message_id and attachment_id from gmail_get_thread (full format lists attachments with their IDs). Saves to ~/Downloads by default; returns the local path for downstream use (e.g. OCR).',
+  {
+    message_id: gmailId.describe('Message ID the attachment belongs to (from gmail_get_thread)'),
+    attachment_id: z.string().min(1).max(2048).describe('Attachment ID (from the attachments[] list in gmail_get_thread)'),
+    filename: z.string().optional().transform(v => v ? stripControlChars(validateStringSize(v, 1000, 'filename')) : v).describe('Filename to save as (default: the attachment filename, or attachment-<id>). Path components are stripped for safety.'),
+    save_dir: z.string().optional().transform(v => v ? validateStringSize(v, 4096, 'save_dir') : v).describe('Directory to save into (default: ~/Downloads). Created if missing.'),
+    account: accountParam,
+  },
+  async (params) => {
+    try {
+      const { account, ...handlerParams } = params;
+      const gmail = getGmailClient(account);
+      const result = await handleDownloadAttachment(gmail, handlerParams);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       return {

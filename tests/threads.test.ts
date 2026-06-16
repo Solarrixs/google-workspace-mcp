@@ -190,8 +190,8 @@ describe('getAttachments', () => {
     };
     const result = getAttachments(payload);
     expect(result).toEqual([
-      { filename: 'spec-sheet.pdf', mime_type: 'application/pdf', size: 45200 },
-      { filename: 'photo.png', mime_type: 'image/png', size: 12000 },
+      { filename: 'spec-sheet.pdf', mime_type: 'application/pdf', size: 45200, attachment_id: 'att1' },
+      { filename: 'photo.png', mime_type: 'image/png', size: 12000, attachment_id: 'att2' },
     ]);
   });
 
