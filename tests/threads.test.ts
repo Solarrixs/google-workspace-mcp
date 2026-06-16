@@ -338,8 +338,8 @@ describe('compact', () => {
 });
 
 describe('truncation', () => {
-  it('truncates message body over 2500 chars', async () => {
-    const longBody = 'A'.repeat(5000);
+  it('truncates message body over 10000 chars', async () => {
+    const longBody = 'A'.repeat(15000);
     const gmail = {
       users: {
         threads: {
@@ -366,7 +366,7 @@ describe('truncation', () => {
 
     const result = await handleGetThread(gmail, { thread_id: 'thread-long' });
     const body = result.messages[0].body_text as string;
-    expect(body.length).toBeLessThan(3000); // Approximate - allows room for truncation marker
+    expect(body.length).toBeLessThan(10100); // 10000 cap + room for truncation marker
     expect(body).toContain('[truncated:');
   });
 });
@@ -566,7 +566,7 @@ describe('integration: long threaded email pipeline', () => {
   it('processes a 6-message thread with quotes, signatures, HTML, and truncation', async () => {
     const longBody =
       "Great, we'll go with Model B. Here are our detailed requirements:\n\n" +
-      'A'.repeat(4500) +
+      'A'.repeat(12000) +
       '\n\nPlease confirm compatibility.';
 
     const gmail = {
@@ -727,10 +727,10 @@ describe('integration: long threaded email pipeline', () => {
     expect(msg4).not.toContain('<div>');
     expect(msg4).not.toContain('CONFIDENTIALITY');
 
-    // Message 5: Body truncated at 2500 chars
+    // Message 5: Body truncated at 10000 chars
     const msg5 = result.messages[4].body_text as string;
     expect(msg5).toContain('[truncated:');
-    expect(msg5.length).toBeLessThan(3000); // Approximate - allows room for truncation marker
+    expect(msg5.length).toBeLessThan(10100); // 10000 cap + room for truncation marker
 
     // Message 6: All quoted → placeholder
     expect(result.messages[5].body_text).toBe('[quoted reply only \u2014 no new content]');
@@ -903,7 +903,8 @@ describe('BUG-017: Unicode truncation with substring()', () => {
   });
 
   it('handles emoji near truncation boundary in body', async () => {
-    const longBody = 'A'.repeat(3995) + '💌' + 'B'.repeat(10);
+    // Emoji straddles the 10000-char truncation boundary to exercise surrogate-pair splitting.
+    const longBody = 'A'.repeat(9999) + '💌' + 'B'.repeat(2000);
     const gmail = {
       users: {
         threads: {
@@ -934,7 +935,7 @@ describe('BUG-017: Unicode truncation with substring()', () => {
     const result = await handleGetThread(gmail, { thread_id: 'thread-emoji-body' });
     const body = result.messages[0].body_text as string;
     expect(body).toContain('[truncated:');
-    expect(body.length).toBeLessThan(3000); // Approximate - allows room for truncation marker
+    expect(body.length).toBeLessThan(10100); // 10000 cap + room for truncation marker
   });
 });
 

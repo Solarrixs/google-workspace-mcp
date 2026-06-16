@@ -316,7 +316,7 @@ describe('Gmail Integration: Thread Workflow', () => {
   });
 
   it('properly truncates long messages', async () => {
-    const longBody = 'A'.repeat(5000);
+    const longBody = 'A'.repeat(15000);
 
     const customGmail = createMockGmail({
       threadsMethods: {
@@ -350,7 +350,7 @@ describe('Gmail Integration: Thread Workflow', () => {
     const thread = await handleGetThread(customGmail, { thread_id: 'thread-long' });
     const body = thread.messages[0].body_text as string;
 
-    expect(body.length).toBeLessThan(3000); // Approximate - allows room for truncation marker
+    expect(body.length).toBeLessThan(10100); // 10000 cap + room for truncation marker
     expect(body).toContain('[truncated:');
   });
 });

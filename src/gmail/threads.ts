@@ -318,8 +318,8 @@ export async function handleGetThread(
     if (bodyText) {
       bodyText = stripQuotedText(bodyText);
       bodyText = stripSignature(bodyText);
-      if (bodyText.length > 2500) {
-        bodyText = bodyText.substring(0, 2500) + '\n\n[truncated: ' + bodyText.length + ' chars]';
+      if (bodyText.length > 10000) {
+        bodyText = bodyText.substring(0, 10000) + '\n\n[truncated: ' + bodyText.length + ' chars]';
       }
     }
 
