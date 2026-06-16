@@ -34,7 +34,7 @@ vi.mock('googleapis', () => ({
   },
 }));
 
-import { getAuthClient, getGmailClient, getCalendarClient, listAccounts } from '../src/auth.js';
+import { getAuthClient, getGmailClient, getCalendarClient, listAccounts, clearAuthCaches } from '../src/auth.js';
 
 // Helper to create v2 multi-account token file JSON
 function v2TokenFile(accounts: Record<string, any>, defaultAccount?: string): string {
@@ -53,6 +53,7 @@ function legacyTokenFile(tokens: any): string {
 describe('BUG-004: Token file corruption crashes server on startup', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearAuthCaches();
   });
 
   it('throws helpful error when tokens.json contains invalid JSON', () => {
@@ -78,6 +79,7 @@ describe('BUG-011: Partial env vars give unhelpful error', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearAuthCaches();
     process.env = { ...originalEnv };
     mockFs.existsSync.mockReturnValue(false);
   });
@@ -134,6 +136,7 @@ describe('BUG-011: Partial env vars give unhelpful error', () => {
 describe('Legacy format auto-migration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearAuthCaches();
   });
 
   it('auto-migrates legacy tokens.json to v2 format on disk', () => {
@@ -174,6 +177,7 @@ describe('Legacy format auto-migration', () => {
 describe('Multi-account resolution', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearAuthCaches();
   });
 
   it('loadTokens with no arg returns default account tokens', () => {
@@ -222,6 +226,7 @@ describe('File takes precedence over env vars', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearAuthCaches();
     process.env = { ...originalEnv };
   });
 
@@ -265,6 +270,7 @@ describe('File takes precedence over env vars', () => {
 describe('Gmail and Calendar client creation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearAuthCaches();
     process.env.GOOGLE_CLIENT_ID = 'test-id';
     process.env.GOOGLE_CLIENT_SECRET = 'test-secret';
     process.env.GOOGLE_REFRESH_TOKEN = 'test-refresh';
@@ -321,6 +327,7 @@ describe('Gmail and Calendar client creation', () => {
 describe('Token refresh event handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearAuthCaches();
     mockFs.existsSync.mockReturnValue(true);
     mockFs.readFileSync.mockReturnValue(v2TokenFile({
       work: {
@@ -411,6 +418,7 @@ describe('Token refresh event handler', () => {
 describe('listAccounts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearAuthCaches();
   });
 
   it('returns account aliases, emails, and default from v2 file', () => {

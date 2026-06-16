@@ -373,8 +373,8 @@ describe('Gmail Integration: Draft Workflow', () => {
       body: 'Hi team,\n\nI\'d like to propose a new project for Q2.\n\nDetails:\n1. Phase 1: Research\n2. Phase 2: Development\n3. Phase 3: Launch\n\nLet me know your thoughts.\n\nThanks,\nMax',
     });
 
-    expect(createResult.id).toBe('draft1');
-    expect(createResult.msg_id).toBe('msg4');
+    expect(createResult.draft_id).toBe('draft1');
+    expect(createResult.message_id).toBe('msg4');
     expect(gmail.users.drafts.create).toHaveBeenCalledTimes(1);
 
     const createCall = gmail.users.drafts.create.mock.calls[0][0];
@@ -387,7 +387,7 @@ describe('Gmail Integration: Draft Workflow', () => {
       body: 'Hi team,\n\nI\'d like to propose a new project for Q2.\n\nDetails:\n1. Phase 1: Research\n2. Phase 2: Development\n3. Phase 3: Launch\n4. Phase 4: Maintenance\n\nLet me know your thoughts.\n\nThanks,\nMax',
     });
 
-    expect(updateResult.id).toBe('draft1');
+    expect(updateResult.draft_id).toBe('draft1');
     expect(gmail.users.drafts.update).toHaveBeenCalledTimes(1);
 
     const updateCall = gmail.users.drafts.update.mock.calls[0][0];

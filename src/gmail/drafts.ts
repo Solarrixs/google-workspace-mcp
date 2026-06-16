@@ -1,6 +1,17 @@
 import type { gmail_v1 } from 'googleapis';
 import { compact } from '../utils.js';
-import { getHeader as getHeaderValue } from './threads.js';
+import { getHeader as getHeaderValue, stripHtmlTags } from './threads.js';
+
+const profileCache = new Map<gmail_v1.Gmail, string>();
+
+async function getFromEmail(gmail: gmail_v1.Gmail): Promise<string> {
+  const cached = profileCache.get(gmail);
+  if (cached) return cached;
+  const profile = await gmail.users.getProfile({ userId: 'me' });
+  const email = profile.data.emailAddress || 'me';
+  profileCache.set(gmail, email);
+  return email;
+}
 
 interface CreateDraftParams {
   to: string;
@@ -12,12 +23,17 @@ interface CreateDraftParams {
   bcc?: string;
 }
 
+const NUMBERED_LIST_RE = /^\d+[\.\)]\s/;
+const BULLET_LIST_RE = /^[-*]\s/;
+const MARKDOWN_LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/;
+const MARKDOWN_LINK_RE_GLOBAL = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+
 function isNumberedListBlock(lines: string[]): boolean {
-  return lines.length > 0 && lines.every((l) => /^\d+[\.\)]\s/.test(l));
+  return lines.length > 0 && lines.every((l) => NUMBERED_LIST_RE.test(l));
 }
 
 function isBulletListBlock(lines: string[]): boolean {
-  return lines.length > 0 && lines.every((l) => /^[-*]\s/.test(l));
+  return lines.length > 0 && lines.every((l) => BULLET_LIST_RE.test(l));
 }
 
 function escapeHtml(text: string): string {
@@ -31,9 +47,18 @@ function linkify(html: string): string {
   // Convert markdown-style [text](url) to <a> tags
   // Runs AFTER escapeHtml so the brackets/parens are still literal (not HTML entities)
   return html.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+    MARKDOWN_LINK_RE_GLOBAL,
     '<a href="$2" style="color:#1a73e8;text-decoration:none">$1</a>'
   );
+}
+
+function hasRichFormatting(text: string): boolean {
+  if (MARKDOWN_LINK_RE.test(text)) return true;
+  const lines = text.split('\n');
+  for (const line of lines) {
+    if (NUMBERED_LIST_RE.test(line) || BULLET_LIST_RE.test(line)) return true;
+  }
+  return false;
 }
 
 function plainTextToHtml(text: string): string {
@@ -49,24 +74,24 @@ function plainTextToHtml(text: string): string {
       // Detect numbered list (all lines start with "1." or "1)")
       if (isNumberedListBlock(lines)) {
         const items = lines
-          .map((l) => `<li style="margin:0 0 4px 0">${linkify(l.replace(/^\d+[\.\)]\s/, ''))}</li>`)
+          .map((l) => `<li>${linkify(l.replace(/^\d+[\.\)]\s/, ''))}</li>`)
           .join('\n');
-        return `<ol style="margin:0 0 12px 0;padding-left:24px">\n${items}\n</ol>`;
+        return `<ol style="margin:0;padding-left:24px">\n${items}\n</ol>`;
       }
 
       // Detect bullet list (all lines start with "- " or "* ")
       if (isBulletListBlock(lines)) {
         const items = lines
-          .map((l) => `<li style="margin:0 0 4px 0">${linkify(l.replace(/^[-*]\s/, ''))}</li>`)
+          .map((l) => `<li>${linkify(l.replace(/^[-*]\s/, ''))}</li>`)
           .join('\n');
-        return `<ul style="margin:0 0 12px 0;padding-left:24px">\n${items}\n</ul>`;
+        return `<ul style="margin:0;padding-left:24px">\n${items}\n</ul>`;
       }
 
       // Regular paragraph — single newlines become <br>
       const inner = block.replace(/\n/g, '<br>');
-      return `<p style="margin:0 0 12px 0">${linkify(inner)}</p>`;
+      return `<p style="margin:0">${linkify(inner)}</p>`;
     })
-    .join('\n');
+    .join('<br>');
 }
 
 export function buildRawEmail(params: {
@@ -79,16 +104,35 @@ export function buildRawEmail(params: {
   inReplyTo?: string;
   references?: string;
 }): string {
-  const sanitizeHeader = (v: string) => v.replace(/[\r\n]/g, '');
+  const encodeNonAscii = (s: string) =>
+    `=?utf-8?B?${Buffer.from(s, 'utf-8').toString('base64')}?=`;
 
-  const htmlBody = `<div style="font-family:sans-serif;font-size:14px;color:#222">${plainTextToHtml(params.body)}</div>`;
+  const sanitizeHeader = (v: string) => {
+    const cleaned = v.replace(/[\r\n]/g, '');
+    if (!/[^\x00-\x7F]/.test(cleaned)) return cleaned;
+    // Handle comma-separated addresses: encode each display name individually
+    return cleaned
+      .split(/,\s*/)
+      .map((addr) => {
+        const m = addr.match(/^(.*?)\s*(<[^>]+>)$/);
+        if (m) return `${encodeNonAscii(m[1].trim())} ${m[2]}`;
+        return encodeNonAscii(addr);
+      })
+      .join(', ');
+  };
+
+  const useHtml = hasRichFormatting(params.body);
+  const emailBody = useHtml
+    ? `<div style="font-family:sans-serif;font-size:14px;color:#222">${plainTextToHtml(params.body)}</div>`
+    : params.body;
 
   const lines: string[] = [
     `From: ${sanitizeHeader(params.from)}`,
     `To: ${sanitizeHeader(params.to)}`,
     `Subject: ${sanitizeHeader(params.subject)}`,
+    `Date: ${new Date().toUTCString()}`,
     'MIME-Version: 1.0',
-    'Content-Type: text/html; charset=utf-8',
+    useHtml ? 'Content-Type: text/html; charset=utf-8' : 'Content-Type: text/plain; charset=utf-8',
   ];
 
   if (params.cc) {
@@ -103,7 +147,7 @@ export function buildRawEmail(params: {
   }
 
   // Empty line separates headers from body
-  lines.push('', htmlBody);
+  lines.push('', emailBody);
 
   return Buffer.from(lines.join('\r\n')).toString('base64url');
 }
@@ -147,8 +191,7 @@ export async function handleCreateDraft(
   params: CreateDraftParams
 ) {
   // Get the user's email address for the From header
-  const profile = await gmail.users.getProfile({ userId: 'me' });
-  const fromEmail = profile.data.emailAddress || 'me';
+  const fromEmail = await getFromEmail(gmail);
 
   // Resolve threading headers (auto-fetches last message's Message-ID if needed)
   let inReplyTo = params.in_reply_to;
@@ -209,10 +252,11 @@ export async function handleUpdateDraft(
   params: UpdateDraftParams
 ) {
   // Fetch existing draft to get current values
+  const needsBody = !params.body;
   const existing = await gmail.users.drafts.get({
     userId: 'me',
     id: params.draft_id,
-    format: 'full',
+    format: needsBody ? 'full' : 'metadata',
   });
 
   const existingHeaders = existing.data.message?.payload?.headers || [];
@@ -220,30 +264,31 @@ export async function handleUpdateDraft(
 
   // Decode existing body (our drafts use text/html, so handle both formats)
   let existingBody = '';
-  const payload = existing.data.message?.payload;
-  if (payload?.body?.data) {
-    const rawBody = Buffer.from(payload.body.data, 'base64url').toString('utf-8');
-    if (payload.mimeType === 'text/html') {
-      existingBody = rawBody.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
-    } else {
-      existingBody = rawBody;
-    }
-  } else if (payload?.parts) {
-    const textPart = payload.parts.find((p: any) => p.mimeType === 'text/plain');
-    const htmlPart = payload.parts.find((p: any) => p.mimeType === 'text/html');
-    const part = textPart || htmlPart;
-    if (part?.body?.data) {
-      const rawBody = Buffer.from(part.body.data, 'base64url').toString('utf-8');
-      if (part.mimeType === 'text/html') {
-        existingBody = rawBody.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+  if (needsBody) {
+    const payload = existing.data.message?.payload;
+    if (payload?.body?.data) {
+      const rawBody = Buffer.from(payload.body.data, 'base64url').toString('utf-8');
+      if (payload.mimeType === 'text/html') {
+        existingBody = stripHtmlTags(rawBody);
       } else {
         existingBody = rawBody;
+      }
+    } else if (payload?.parts) {
+      const textPart = payload.parts.find((p: any) => p.mimeType === 'text/plain');
+      const htmlPart = payload.parts.find((p: any) => p.mimeType === 'text/html');
+      const part = textPart || htmlPart;
+      if (part?.body?.data) {
+        const rawBody = Buffer.from(part.body.data, 'base64url').toString('utf-8');
+        if (part.mimeType === 'text/html') {
+          existingBody = stripHtmlTags(rawBody);
+        } else {
+          existingBody = rawBody;
+        }
       }
     }
   }
 
-  const profile = await gmail.users.getProfile({ userId: 'me' });
-  const fromEmail = profile.data.emailAddress || 'me';
+  const fromEmail = await getFromEmail(gmail);
 
   const threadId = params.thread_id || existing.data.message?.threadId;
 
@@ -311,7 +356,7 @@ export async function handleListDrafts(
       const detail = await gmail.users.drafts.get({
         userId: 'me',
         id: draft.id!,
-        format: 'full',
+        format: 'metadata',
       });
 
       const headers = detail.data.message?.payload?.headers || [];

@@ -3,15 +3,13 @@ import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { getAuthClient, getGmailClient, getCalendarClient } from '../src/auth.js';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 describe('OAuth Security Audit', () => {
-  const TOKEN_PATH = path.join(
-    process.env.HOME || process.cwd(),
-    '.config',
-    'google-workspace-mcp',
-    'tokens.json'
-  );
+  // Use a temp directory for test tokens — never touch real credentials
+  const TEST_TOKEN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'gw-mcp-test-'));
+  const TOKEN_PATH = path.join(TEST_TOKEN_DIR, 'tokens.json');
 
   let originalEnv: NodeJS.ProcessEnv;
   let originalConsoleLog: typeof console.log;
@@ -27,12 +25,12 @@ describe('OAuth Security Audit', () => {
     originalConsoleError = console.error;
 
     console.log = (...args: any[]) => {
-      logOutput.push(args.map(arg => 
+      logOutput.push(args.map(arg =>
         typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
       ).join(' '));
     };
     console.error = (...args: any[]) => {
-      errorOutput.push(args.map(arg => 
+      errorOutput.push(args.map(arg =>
         typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
       ).join(' '));
     };
@@ -43,7 +41,7 @@ describe('OAuth Security Audit', () => {
     console.log = originalConsoleLog;
     console.error = originalConsoleError;
 
-    // Clean up test token file
+    // Clean up test token file (in temp dir, not real credentials)
     if (fs.existsSync(TOKEN_PATH)) {
       fs.unlinkSync(TOKEN_PATH);
     }

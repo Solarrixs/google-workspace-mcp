@@ -67,9 +67,9 @@ export function getMessageBody(
   if (payload.parts) {
     for (const part of payload.parts) {
       if (part.mimeType === 'text/plain' && part.body?.data) {
-        text = decodeBase64Url(part.body.data);
+        if (!text) text = decodeBase64Url(part.body.data);
       } else if (part.mimeType === 'text/html' && part.body?.data) {
-        html = decodeBase64Url(part.body.data);
+        if (!html) html = decodeBase64Url(part.body.data);
       } else if (part.parts) {
         // Nested multipart
         const nested = getMessageBody(part);
@@ -184,7 +184,8 @@ export function stripSignature(text: string): string {
     const afterSignOff = result.substring(signOffMatch.index + signOffMatch[1].length).trim();
     const lines = afterSignOff.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     // If remaining lines are short (name, title, phone, etc.) - max 5 short lines
-    const isJustSignature = lines.length <= 5 && lines.every(l => l.length < 80);
+    const hasListItems = lines.some(l => /^[-*]\s|^\d+[.)]\s/.test(l));
+    const isJustSignature = !hasListItems && lines.length <= 5 && lines.every(l => l.length < 80);
     if (isJustSignature) {
       result = result.substring(0, signOffMatch.index).trimEnd();
     }
@@ -271,9 +272,10 @@ export async function handleListThreads(
         snippet = snippet.substring(0, 150) + '...';
       }
 
-      const filteredLabels = labels.filter(
-        (l) => KEEP_LABELS.has(l) || !l.startsWith('CATEGORY_')
-      );
+      const filteredLabels = labels.filter((l) => {
+        const upper = l.toUpperCase();
+        return KEEP_LABELS.has(upper) || !upper.startsWith('CATEGORY_');
+      });
 
       return compact({
         id: t.id,

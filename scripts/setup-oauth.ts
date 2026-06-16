@@ -1,5 +1,6 @@
 import { google } from 'googleapis';
 import * as http from 'http';
+import * as net from 'net';
 import * as fs from 'fs';
 import * as url from 'url';
 import * as readline from 'readline';
@@ -19,7 +20,25 @@ function sanitizeError(error: any): string {
   return 'An error occurred';
 }
 
-const REDIRECT_URI = 'http://localhost:3000/oauth2callback';
+const PREFERRED_PORT = 3000;
+
+async function findAvailablePort(preferred: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.listen(preferred, () => {
+      server.close(() => resolve(preferred));
+    });
+    server.on('error', () => {
+      // Preferred port taken - let OS assign a random available port
+      const fallback = net.createServer();
+      fallback.listen(0, () => {
+        const { port } = fallback.address() as net.AddressInfo;
+        fallback.close(() => resolve(port));
+      });
+      fallback.on('error', (err) => reject(err));
+    });
+  });
+}
 
 interface StoredTokens {
   client_id: string;
@@ -111,7 +130,13 @@ async function main() {
     }
   }
 
-  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, REDIRECT_URI);
+  const port = await findAvailablePort(PREFERRED_PORT);
+  const redirectUri = `http://localhost:${port}/oauth2callback`;
+  if (port !== PREFERRED_PORT) {
+    console.log(`\nPort ${PREFERRED_PORT} is in use, using port ${port} instead.`);
+  }
+
+  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 
   // Generate random state parameter for CSRF protection
   const state = randomBytes(32).toString('hex');
@@ -175,8 +200,8 @@ async function main() {
       }
     });
 
-    server.listen(3000, () => {
-      console.log('Waiting for authorization callback on http://localhost:3000 ...');
+    server.listen(port, () => {
+      console.log(`Waiting for authorization callback on http://localhost:${port} ...`);
     });
 
     // Timeout after 2 minutes

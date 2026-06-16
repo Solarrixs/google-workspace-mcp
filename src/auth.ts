@@ -26,6 +26,9 @@ const SCOPES = [
 
 export { SCOPES, TOKEN_DIR, TOKEN_PATH };
 
+let cachedStore: MultiAccountTokenFile | null = null;
+const clientCache = new Map<string, OAuth2Client>();
+
 interface StoredTokens {
   client_id: string;
   client_secret: string;
@@ -44,6 +47,8 @@ interface MultiAccountTokenFile {
 }
 
 function loadAccountStore(): MultiAccountTokenFile {
+  if (cachedStore) return cachedStore;
+
   // First try tokens.json file
   if (fs.existsSync(TOKEN_PATH)) {
     let data: any;
@@ -78,7 +83,8 @@ function loadAccountStore(): MultiAccountTokenFile {
 
     // v2 multi-account format
     if (data.version === 2) {
-      return data as MultiAccountTokenFile;
+      cachedStore = data as MultiAccountTokenFile;
+      return cachedStore;
     }
 
     // Legacy flat format — auto-migrate to v2
@@ -92,6 +98,7 @@ function loadAccountStore(): MultiAccountTokenFile {
     const tmpPath = TOKEN_PATH + '.tmp';
     fs.writeFileSync(tmpPath, JSON.stringify(migrated, null, 2));
     fs.renameSync(tmpPath, TOKEN_PATH);
+    cachedStore = migrated;
     return migrated;
   }
 
@@ -201,6 +208,7 @@ function saveTokens(tokens: StoredTokens, account: string): void {
   const content = JSON.stringify(store, null, 2);
   fs.writeFileSync(tmpPath, content);
   fs.renameSync(tmpPath, TOKEN_PATH);
+  cachedStore = store;
 
   // Keep a backup of the last known good state
   try { fs.writeFileSync(TOKEN_PATH + '.bak', content); } catch {}
@@ -208,6 +216,9 @@ function saveTokens(tokens: StoredTokens, account: string): void {
 
 export function getAuthClient(account?: string): OAuth2Client {
   const { alias, tokens } = loadTokens(account);
+
+  const cachedClient = clientCache.get(alias);
+  if (cachedClient) return cachedClient;
 
   const oauth2Client = new google.auth.OAuth2(
     tokens.client_id,
@@ -234,6 +245,7 @@ export function getAuthClient(account?: string): OAuth2Client {
     saveTokens(updated, alias);
   });
 
+  clientCache.set(alias, oauth2Client);
   return oauth2Client;
 }
 
@@ -243,6 +255,17 @@ export function getGmailClient(account?: string) {
 
 export function getCalendarClient(account?: string) {
   return google.calendar({ version: 'v3', auth: getAuthClient(account) });
+}
+
+export function clearAuthCaches(): void {
+  cachedStore = null;
+  clientCache.clear();
+}
+
+export function getAccountEmail(account?: string): string | undefined {
+  const store = loadAccountStore();
+  const alias = account || store.default_account;
+  return store.accounts[alias]?.email;
 }
 
 export function listAccounts(): { accounts: { alias: string; email?: string }[]; default_account: string } {

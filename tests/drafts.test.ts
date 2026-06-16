@@ -14,7 +14,7 @@ describe('buildRawEmail', () => {
     expect(decoded).toContain('From: maxx@engramcompute.com');
     expect(decoded).toContain('To: recipient@example.com');
     expect(decoded).toContain('Subject: Test Subject');
-    expect(decoded).toContain('Content-Type: text/html; charset=utf-8');
+    expect(decoded).toContain('Content-Type: text/plain; charset=utf-8');
     expect(decoded).toContain('MIME-Version: 1.0');
     expect(decoded).toContain('Hello there!');
   });
@@ -88,8 +88,8 @@ describe('buildRawEmail', () => {
 
     const decoded = Buffer.from(raw, 'base64url').toString('utf-8');
     // RFC 2822: headers and body separated by \r\n\r\n
-    // Body is HTML-encoded with <div><p> tags
-    expect(decoded).toContain('\r\n\r\n<div style="font-family:sans-serif;font-size:14px;color:#222"><p style="margin:0 0 12px 0">Body text here</p></div>');
+    // Plain text body (no rich formatting) is sent as-is
+    expect(decoded).toContain('\r\n\r\nBody text here');
   });
 
   it('produces valid base64url output', () => {
@@ -163,9 +163,9 @@ describe('handleCreateDraft', () => {
       body: 'Hello!',
     });
 
-    expect(result.id).toBe('draft1');
-    expect(result.msg_id).toBe('draftmsg1');
-    expect(result.thread_id).toBeUndefined();
+    expect(result.draft_id).toBe('draft1');
+    expect(result.message_id).toBe('draftmsg1');
+    expect(result.thread_id).toBe('thread1');
 
     const createCall = gmail.users.drafts.create.mock.calls[0][0];
     expect(createCall.userId).toBe('me');
