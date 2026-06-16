@@ -157,6 +157,26 @@ Add to `package.json`:
 }
 ```
 
+## Superhuman Label Integration
+
+Superhuman auto-applies AI labels that provide direction and category signals. The watcher should leverage these:
+
+**Direction signal:**
+- `[Superhuman]/AI/Respond` — someone is waiting on the user. These emails need reply drafts.
+- `[Superhuman]/AI/Waiting` — user is waiting on someone. No draft needed, but useful for nudge reminders.
+
+**Skip labels** (add to `skip_labels` config):
+- `[Superhuman]/Is Snoozed` — snoozed, will resurface in Superhuman
+- `[Superhuman]/AI/AutoArchived` — auto-archived by Superhuman
+- `[Superhuman]/Muted` — muted threads
+- `[Superhuman]/AI/Marketing` — marketing emails
+- `[Superhuman]/AI/News` — newsletters/news
+- `[Superhuman]/AI/Social` — social notifications
+- `[Superhuman]/AI/Meeting` — calendar invites/scheduling
+- `[Superhuman]/AI/Travel` — flight/hotel confirmations (personal account only)
+
+These labels reduce the need for manual classification in the prompt template — the watcher can check labels before spawning Claude, and skip emails that don't need a response.
+
 ## Configuration (future)
 
 Not in v1, but worth planning for:
@@ -169,16 +189,24 @@ Not in v1, but worth planning for:
   "model": "sonnet",
   "max_body_length": 3000,
   "timeout_ms": 120000,
-  "skip_labels": ["CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_UPDATES"],
+  "skip_labels": [
+    "[Superhuman]/Is Snoozed",
+    "[Superhuman]/AI/AutoArchived",
+    "[Superhuman]/Muted",
+    "[Superhuman]/AI/Marketing",
+    "[Superhuman]/AI/News",
+    "[Superhuman]/AI/Social",
+    "[Superhuman]/AI/Meeting",
+    "[Superhuman]/AI/Travel",
+    "CATEGORY_PROMOTIONS",
+    "CATEGORY_SOCIAL",
+    "CATEGORY_UPDATES"
+  ],
   "skip_senders": ["noreply@*", "notifications@github.com"],
   "rules": [
     {
       "match": { "from": "*@company.com" },
       "prompt_append": "This is from a coworker. Always draft a reply. Keep it professional."
-    },
-    {
-      "match": { "label": "CATEGORY_PROMOTIONS" },
-      "action": "skip"
     }
   ],
   "notify": true

@@ -1,0 +1,150 @@
+variables:
+  my_first_name: ""
+  calendar_link: ""
+  company_name: ""
+
+templates:
+  - id: interview-scheduling
+    name: Interview Scheduling
+    description: Schedule, confirm, or reschedule interview times with candidates
+    match_labels:
+      - "AI/Respond"
+    match_subject_keywords:
+      - interview
+      - schedule
+      - availability
+      - calendar
+    variants:
+      - name: propose-times
+        tone: professional-friendly
+        body: |
+          Hi {candidate_name},
+
+          Thanks for your interest! I'd love to set up a time to chat.
+
+          You can grab a slot that works for you here: {calendar_link}
+
+          Looking forward to connecting!
+
+          {my_first_name}
+      - name: confirm
+        tone: warm
+        body: |
+          Hi {candidate_name},
+
+          Great — you're confirmed for {interview_time}. Looking forward to it!
+
+          {my_first_name}
+      - name: reschedule
+        tone: understanding
+        body: |
+          Hi {candidate_name},
+
+          No worries at all! Feel free to pick a new time here: {calendar_link}
+
+          {my_first_name}
+
+  - id: candidate-followup
+    name: Candidate Follow-up
+    description: Nudge candidates who haven't responded to outreach
+    match_labels:
+      - "AI/Respond"
+    match_subject_keywords:
+      - follow up
+      - following up
+      - checking in
+    variants:
+      - name: gentle
+        tone: casual-friendly
+        body: |
+          Hi {candidate_name},
+
+          Just circling back on my earlier note — wanted to make sure it didn't get buried. Would love to chat if you're open to it!
+
+          {my_first_name}
+      - name: deadline
+        tone: professional-urgent
+        body: |
+          Hi {candidate_name},
+
+          Quick heads up — we're moving forward with this role soon. If you're interested, I'd love to connect this week.
+
+          {my_first_name}
+      - name: offer-help
+        tone: helpful
+        body: |
+          Hi {candidate_name},
+
+          Totally understand if the timing isn't right. Happy to answer any questions about the role or {company_name} if that'd be helpful.
+
+          {my_first_name}
+
+  - id: info-request
+    name: Information Request
+    description: Answer questions about role, company, or hiring process
+    match_labels:
+      - "AI/Respond"
+    match_subject_keywords:
+      - question
+      - more info
+      - details
+      - salary
+      - compensation
+      - benefits
+      - remote
+    variants:
+      - name: general
+        tone: informative-friendly
+        body: |
+          Hi {candidate_name},
+
+          Great question! Here's what I can share:
+
+          [Answer their specific question here]
+
+          Happy to dig into anything else — just let me know.
+
+          {my_first_name}
+
+  - id: acknowledgment
+    name: Application Acknowledgment
+    description: Confirm receipt of applications or resumes
+    match_labels:
+      - "AI/Respond"
+    match_subject_keywords:
+      - application
+      - resume
+      - cv
+      - applying
+    variants:
+      - name: received
+        tone: warm-professional
+        body: |
+          Hi {candidate_name},
+
+          Thanks for sending this over! I've got it and will take a look shortly. I'll be in touch once I've had a chance to review.
+
+          {my_first_name}
+
+  - id: follow-up-nudge
+    name: Follow-up Nudge
+    description: Used by nudge detection for stale sent emails with no reply
+    match_subject_keywords:
+      - _nudge_system_
+    variants:
+      - name: brief-checkin
+        tone: casual
+        body: |
+          Hi {candidate_name},
+
+          Just wanted to bump this to the top of your inbox — still interested in connecting if you are!
+
+          {my_first_name}
+      - name: add-value
+        tone: helpful
+        body: |
+          Hi {candidate_name},
+
+          Following up on my earlier note. Thought I'd mention [relevant detail about role/company]. Would love to chat if you're interested.
+
+          {my_first_name}
