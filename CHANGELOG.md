@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 
 ## [Unreleased] - 2026-02-20
 
+### Gmail Attachments
+- New tool `gmail_download_attachment` (`src/gmail/attachments.ts`): downloads an attachment to disk by `message_id` + `attachment_id`, decoding base64url bytes. Defaults to `~/Downloads`, returns the saved path for downstream use (e.g. OCR / Read). Uses existing `gmail.readonly` scope — no re-auth.
+  - `sanitizeFilename()` strips path components, leading dots, and control chars; `resolveSavePath()` is a backstop that throws if the resolved path escapes the save dir.
+- `getAttachments()` (`src/gmail/threads.ts`) now includes `attachment_id` per attachment, so `gmail_get_thread` (full) surfaces the ID needed to download.
+
 ### Calendar Validation
 - `parseDateTime()` now validates date values — rejects invalid dates (e.g., "2024-13-99"), empty strings, and non-date strings (e.g., "tomorrow") with clear error messages
 - `calendar_list_events`: `max_results` now uses `??` instead of `||`, so explicit `0` is respected

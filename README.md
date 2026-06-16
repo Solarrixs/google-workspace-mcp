@@ -91,6 +91,7 @@ All tools accept an optional `account` parameter to select which Google account 
 | `gmail_delete_draft` | Permanently delete a draft |
 | `gmail_list_drafts` | List all drafts with IDs, subjects, and recipients |
 | `gmail_list_labels` | List all Gmail labels (system and user, including Superhuman auto-labels) |
+| `gmail_download_attachment` | Download an attachment (by `message_id` + `attachment_id` from `gmail_get_thread`) to disk; defaults to `~/Downloads`, returns the local path |
 
 ### Calendar
 
@@ -122,7 +123,7 @@ npx vitest run tests/drafts.test.ts   # Run a single test file
 
 ```
 src/
-├── index.ts              # MCP server — 12 tools with account param, transport
+├── index.ts              # MCP server — 13 tools with account param, transport
 ├── auth.ts               # Multi-account OAuth2 factory, token migration, account resolution
 ├── utils.ts              # compact() utility
 ├── gmail/
