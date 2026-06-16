@@ -224,12 +224,12 @@ server.tool(
 
 server.tool(
   'gmail_download_attachment',
-  'Download an email attachment to disk. Get message_id and attachment_id from gmail_get_thread (full format lists attachments with their IDs). Saves to ~/Downloads by default; returns the local path for downstream use (e.g. OCR).',
+  'Download an email attachment to disk. Get message_id and attachment_id from gmail_get_thread (full format lists attachments with their IDs). Saves to an ephemeral temp dir by default (auto-pruned after 24h) and returns the local path for downstream use (e.g. OCR / Read). Pass save_dir (e.g. ~/Downloads) to keep a file permanently.',
   {
     message_id: gmailId.describe('Message ID the attachment belongs to (from gmail_get_thread)'),
     attachment_id: z.string().min(1).max(2048).describe('Attachment ID (from the attachments[] list in gmail_get_thread)'),
     filename: z.string().optional().transform(v => v ? stripControlChars(validateStringSize(v, 1000, 'filename')) : v).describe('Filename to save as (default: the attachment filename, or attachment-<id>). Path components are stripped for safety.'),
-    save_dir: z.string().optional().transform(v => v ? validateStringSize(v, 4096, 'save_dir') : v).describe('Directory to save into (default: ~/Downloads). Created if missing.'),
+    save_dir: z.string().optional().transform(v => v ? validateStringSize(v, 4096, 'save_dir') : v).describe('Directory to save into. Default: an ephemeral temp dir (auto-pruned after 24h). Pass a permanent path like ~/Downloads to keep the file. Created if missing.'),
     account: accountParam,
   },
   async (params) => {

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { sanitizeFilename, resolveSavePath, uniquePath } from '../src/gmail/attachments.js';
+import { sanitizeFilename, resolveSavePath, uniquePath, pruneOldFiles } from '../src/gmail/attachments.js';
 
 describe('sanitizeFilename', () => {
   it('keeps a normal filename', () => {
@@ -87,5 +87,31 @@ describe('uniquePath', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('pruneOldFiles', () => {
+  it('deletes files older than maxAge but keeps recent ones', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-prune-'));
+    try {
+      const old = path.join(dir, 'old.pdf');
+      const fresh = path.join(dir, 'fresh.pdf');
+      fs.writeFileSync(old, 'a');
+      fs.writeFileSync(fresh, 'b');
+      // Backdate `old` 48h via utimes.
+      const longAgo = (Date.now() - 48 * 3600 * 1000) / 1000;
+      fs.utimesSync(old, longAgo, longAgo);
+
+      pruneOldFiles(dir, 24 * 3600 * 1000);
+
+      expect(fs.existsSync(old)).toBe(false);
+      expect(fs.existsSync(fresh)).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not throw when the directory does not exist', () => {
+    expect(() => pruneOldFiles(path.join(os.tmpdir(), 'mcp-prune-nonexistent-xyz'), 1000)).not.toThrow();
   });
 });

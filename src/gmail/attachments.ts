@@ -11,9 +11,14 @@ interface DownloadAttachmentParams {
   save_dir?: string;
 }
 
-// Default landing spot for downloaded attachments. Discoverable and matches the
-// "download then /ocr" workflow (see google-workspace-mcp CLAUDE.md).
-const DEFAULT_SAVE_DIR = path.join(os.homedir(), 'Downloads');
+// Default landing spot: an ephemeral system-temp subdir. Downloaded attachments
+// are mostly read-and-discard (download then Read/OCR), so they live in temp,
+// get auto-pruned (see pruneOldFiles), and are reaped by the OS. Pass an
+// explicit save_dir (e.g. ~/Downloads) to keep a file permanently.
+const DEFAULT_SAVE_DIR = path.join(os.tmpdir(), 'gmail-mcp-attachments');
+
+// Files in the default dir older than this are pruned on each download.
+const PRUNE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h
 
 /**
  * Reduce one candidate string to a safe basename, or '' if nothing usable
@@ -69,13 +74,45 @@ export function uniquePath(p: string): string {
   return p; // 1000 collisions — give up and overwrite
 }
 
+/**
+ * Best-effort prune of files older than maxAgeMs in `dir`. Used to keep the
+ * ephemeral default temp dir from accumulating. Never throws (a prune failure
+ * must not block a download); only touches regular files directly in `dir`.
+ */
+export function pruneOldFiles(dir: string, maxAgeMs: number, now: number = Date.now()): void {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return; // dir doesn't exist yet — nothing to prune
+  }
+  for (const name of entries) {
+    const p = path.join(dir, name);
+    try {
+      const st = fs.statSync(p);
+      if (st.isFile() && now - st.mtimeMs > maxAgeMs) {
+        fs.unlinkSync(p);
+      }
+    } catch {
+      // file vanished or unreadable — skip
+    }
+  }
+}
+
 export async function handleDownloadAttachment(
   gmail: gmail_v1.Gmail,
   params: DownloadAttachmentParams
 ) {
+  const usingDefaultDir = !params.save_dir;
   const saveDir = params.save_dir ? path.resolve(params.save_dir) : DEFAULT_SAVE_DIR;
   const filename = sanitizeFilename(params.filename, `attachment-${params.attachment_id.slice(0, 12)}`);
   const savePath = resolveSavePath(saveDir, filename);
+
+  // Auto-prune stale files, but ONLY in our own ephemeral default dir — never
+  // touch a user-supplied save_dir.
+  if (usingDefaultDir) {
+    pruneOldFiles(saveDir, PRUNE_MAX_AGE_MS);
+  }
 
   const res = await gmail.users.messages.attachments.get({
     userId: 'me',

@@ -91,7 +91,7 @@ All tools accept an optional `account` parameter to select which Google account 
 | `gmail_delete_draft` | Permanently delete a draft |
 | `gmail_list_drafts` | List all drafts with IDs, subjects, and recipients |
 | `gmail_list_labels` | List all Gmail labels (system and user, including Superhuman auto-labels) |
-| `gmail_download_attachment` | Download an attachment (by `message_id` + `attachment_id` from `gmail_get_thread`) to disk; defaults to `~/Downloads`, returns the local path |
+| `gmail_download_attachment` | Download an attachment (by `message_id` + `attachment_id` from `gmail_get_thread`) to disk; defaults to an ephemeral temp dir (auto-pruned after 24h), returns the local path. Pass `save_dir` to keep it (e.g. `~/Downloads`) |
 
 ### Calendar
 

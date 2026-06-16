@@ -5,8 +5,9 @@ All notable changes to this project are documented here.
 ## [Unreleased] - 2026-02-20
 
 ### Gmail Attachments
-- New tool `gmail_download_attachment` (`src/gmail/attachments.ts`): downloads an attachment to disk by `message_id` + `attachment_id`, decoding base64url bytes. Defaults to `~/Downloads`, returns the saved path for downstream use (e.g. OCR / Read). Uses existing `gmail.readonly` scope — no re-auth.
+- New tool `gmail_download_attachment` (`src/gmail/attachments.ts`): downloads an attachment to disk by `message_id` + `attachment_id`, decoding base64url bytes. Defaults to an ephemeral temp dir (`$TMPDIR/gmail-mcp-attachments/`), returns the saved path for downstream use (e.g. OCR / Read). Pass `save_dir` to keep a file permanently. Uses existing `gmail.readonly` scope — no re-auth.
   - `sanitizeFilename()` strips path components, leading dots, and control chars; `resolveSavePath()` is a backstop that throws if the resolved path escapes the save dir.
+  - `pruneOldFiles()`: on each download, files older than 24h in the default temp dir are pruned (never touches a user-supplied `save_dir`); `uniquePath()` avoids clobbering same-named downloads.
 - `getAttachments()` (`src/gmail/threads.ts`) now includes `attachment_id` per attachment, so `gmail_get_thread` (full) surfaces the ID needed to download.
 
 ### Calendar Validation
